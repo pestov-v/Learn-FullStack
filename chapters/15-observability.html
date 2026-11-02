@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>15. Логи, метрики, трейсинг — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 15 · <span class="level-badge level-3">Про</span></div>
+  <h1>Логи, метрики, трейсинг</h1>
+  <p class="lead">Після цього розділу ви зможете о третій ночі за п'ять хвилин зрозуміти, що саме зламалось у проді — не перезапускаючи все підряд навмання.</p>
+  <div class="meta"><span>⏱ ~90 хв</span><span>📚 Передумови: розділи 04, 11, 13, 14</span><span>🎯 Ціль: спостережуваність (observability) як звичка</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Чому «на моєму ноутбуці працює» не рятує о 3 ночі</a></li>
+    <li><a href="#s2">Monitoring vs observability</a></li>
+    <li><a href="#s3">Три стовпи: логи, метрики, трейси</a></li>
+    <li><a href="#s4">Логування правильно</a></li>
+    <li><a href="#s5">Метрики: типи, RED, USE, Prometheus</a></li>
+    <li><a href="#s6">Трейсинг і OpenTelemetry</a></li>
+    <li><a href="#s7">SLI, SLO, SLA, error budget і алерти</a></li>
+    <li><a href="#s8">Health checks, профілювання, «золоті сигнали»</a></li>
+    <li><a href="#s9">Інцидент: від виявлення до postmortem</a></li>
+    <li><a href="#s10">Вартість observability і семплінг</a></li>
+    <li><a href="#s11">Практика: pino + prom-client + OTel + Grafana</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви автомобіль. Коли ти їдеш, ти дивишся на <b>спідометр</b> (як швидко їдемо), на <b>лампочки</b> (червона — щось не так, треба зупинитись) і, якщо щось зламалось, механік читає <b>бортовий журнал</b>: «о 14:03 перегрівся двигун, о 14:05 водій зупинився».</p>
+  <p>Наш сервер — така сама машина. <b>Метрики</b> — це спідометр і датчики (скільки запитів за секунду, скільки пам'яті). <b>Алерти</b> — лампочки, що загоряються, коли щось погано. <b>Логи</b> — бортовий журнал: «о 03:12 користувач Оля намагалась оплатити, а банк не відповів». А <b>трейси</b> — це як GPS-трек однієї конкретної поїздки: куди їхали, де застрягли в заторі на 4 секунди. Без цього всього ти їдеш вночі з вимкненими фарами.</p>
+</div>
+
+<h2 id="s1">1. Чому «на моєму ноутбуці працює» не рятує о 3 ночі</h2>
+<p>У розділі про масштабування ми будували системи з десятками копій сервісів, чергами, кешами й реплікованими базами. Тепер уявіть: третя ночі, вам телефонують — «сайт повільний, оплати не проходять». Ви відкриваєте ноутбук. Що ви бачите? Якщо відповідь «нічого, крім коду» — у вас проблема більша, ніж баг.</p>
+<p>Локально програма працює в ідеальному світі: одна копія, нуль користувачів, швидка мережа, свіжий кеш. У проді — 12 копій за балансувальником, 3000 користувачів одночасно, база під навантаженням, зовнішній платіжний сервіс, який «іноді» відповідає за 8 секунд. Помилка може бути на будь-якій з цих ланок, і відтворити її на ноутбуці зазвичай неможливо.</p>
+<p>Тому інженери домовились: система має <b>сама розповідати про себе</b>. Це і є спостережуваність (observability). Термін прийшов із теорії керування: система спостережувана, якщо за її зовнішніми сигналами можна визначити внутрішній стан. Простими словами — не треба заходити всередину «під капот», щоб зрозуміти, що зламалось.</p>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Приладова панель авто як аналогія observability">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="30" width="200" height="190" rx="14" class="accent"/>
+    <text x="120" y="60" text-anchor="middle" class="bold">Автомобіль</text>
+    <text x="120" y="95" text-anchor="middle" class="small">Спідометр, тахометр</text>
+    <text x="120" y="120" text-anchor="middle" class="small">Червона лампочка</text>
+    <text x="120" y="145" text-anchor="middle" class="small">Бортовий журнал</text>
+    <text x="120" y="170" text-anchor="middle" class="small">GPS-трек поїздки</text>
+    <text x="120" y="200" text-anchor="middle" class="muted">що бачить водій</text>
+    <path d="M225 125 L305 125" class="arrow"/>
+    <text x="265" y="115" text-anchor="middle" class="muted">аналогія</text>
+    <rect x="310" y="30" width="200" height="190" rx="14" class="blue"/>
+    <text x="410" y="60" text-anchor="middle" class="bold">Сервер</text>
+    <text x="410" y="95" text-anchor="middle" class="small">Метрики (metrics)</text>
+    <text x="410" y="120" text-anchor="middle" class="small">Алерти (alerts)</text>
+    <text x="410" y="145" text-anchor="middle" class="small">Логи (logs)</text>
+    <text x="410" y="170" text-anchor="middle" class="small">Трейси (traces)</text>
+    <text x="410" y="200" text-anchor="middle" class="muted">що бачить інженер</text>
+    <path d="M515 125 L595 125" class="arrow"/>
+    <rect x="600" y="70" width="140" height="110" rx="14" class="green"/>
+    <text x="670" y="105" text-anchor="middle" class="bold">Відповідь</text>
+    <text x="670" y="130" text-anchor="middle" class="small">«що зламалось,</text>
+    <text x="670" y="150" text-anchor="middle" class="small">де і чому»</text>
+  </svg>
+  <figcaption>Панель приладів у машині і телеметрія сервера відповідають на одне питання: що відбувається всередині, без розбирання двигуна.</figcaption>
+</figure>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Середній час до виявлення проблеми (MTTD, mean time to detect) і до відновлення (MTTR, mean time to recover) — це головні цифри, за якими оцінюють зрілість команди. Без телеметрії про падіння ви дізнаєтесь від користувачів у Twitter, а причину шукатимете годинами. З нормальною телеметрією алерт приходить за 2 хвилини, а причина видна в трейсі за 5. Різниця — це гроші, репутація і ваш сон.</p>
+</div>
+
+<h2 id="s2">2. Monitoring vs observability</h2>
+<p>Ці слова часто плутають, але різниця важлива.</p>
+<p><b>Моніторинг (monitoring)</b> — це коли ви заздалегідь знаєте, що може зламатись, і ставите на це датчик. «Якщо CPU &gt; 90 % — дзвони». «Якщо база не відповідає — дзвони». Це відповіді на <i>відомі</i> питання (known unknowns).</p>
+<p><b>Спостережуваність (observability)</b> — це здатність відповідати на питання, які ви <i>не передбачили</i> (unknown unknowns). «Чому саме користувачі з Польщі на Android отримують помилку при оплаті карткою Visa після 23:00?» Такого алерту ніхто не ставив. Але якщо у вас є структуровані логи з полями <code>country</code>, <code>platform</code>, <code>payment_method</code> і трейси, ви можете <i>запитати</i> дані й отримати відповідь.</p>
+<p>Простіше: моніторинг — це лампочки, які ви прикрутили заздалегідь. Observability — це можливість підключити діагностичний сканер і задати будь-яке питання. Одне не замінює інше: лампочки будять вас, сканер пояснює причину.</p>
+
+<h2 id="s3">3. Три стовпи: логи, метрики, трейси</h2>
+<p>Класична модель називає три типи телеметрії «трьома стовпами» (three pillars). Насправді це не три окремі речі, а три погляди на одну подію. Ключ, що їх пов'язує, — <b>trace id</b>, унікальний ідентифікатор одного запиту користувача.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Стовп</th><th>Що це</th><th>Відповідає на</th><th>Ціна зберігання</th></tr>
+<tr><td><b>Логи (logs)</b></td><td>Текстові/JSON-записи про події з timestamp</td><td>«Що саме сталось у цей момент?»</td><td>Висока (об'єм росте з трафіком)</td></tr>
+<tr><td><b>Метрики (metrics)</b></td><td>Числа, агреговані в часі: лічильники, гістограми</td><td>«Скільки? Як швидко? Тренд?»</td><td>Низька (фіксований розмір незалежно від трафіку)</td></tr>
+<tr><td><b>Трейси (traces)</b></td><td>Дерево спанів одного запиту через усі сервіси</td><td>«Де саме витрачено час? Який сервіс винен?»</td><td>Середня (зазвичай семплюють)</td></tr>
+</table>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Три стовпи телеметрії пов'язані через trace id">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="280" y="20" width="200" height="60" rx="14" class="accent"/>
+    <text x="380" y="45" text-anchor="middle" class="bold">Запит користувача</text>
+    <text x="380" y="67" text-anchor="middle" class="mono">trace_id = 4bf92f35...</text>
+    <path d="M330 80 L130 130" class="arrow"/>
+    <path d="M380 80 L380 130" class="arrow"/>
+    <path d="M430 80 L630 130" class="arrow"/>
+    <rect x="30" y="135" width="200" height="120" rx="14" class="blue"/>
+    <text x="130" y="160" text-anchor="middle" class="bold">Логи</text>
+    <text x="130" y="185" text-anchor="middle" class="mono">{"level":"error",</text>
+    <text x="130" y="203" text-anchor="middle" class="mono">"trace_id":"4bf92f35",</text>
+    <text x="130" y="221" text-anchor="middle" class="mono">"msg":"bank timeout"}</text>
+    <text x="130" y="245" text-anchor="middle" class="muted">подія в момент часу</text>
+    <rect x="280" y="135" width="200" height="120" rx="14" class="green"/>
+    <text x="380" y="160" text-anchor="middle" class="bold">Метрики</text>
+    <text x="380" y="185" text-anchor="middle" class="mono">http_requests_total</text>
+    <text x="380" y="203" text-anchor="middle" class="mono">{status="500"} +1</text>
+    <text x="380" y="221" text-anchor="middle" class="mono">duration_seconds 8.2</text>
+    <text x="380" y="245" text-anchor="middle" class="muted">агрегат, без trace_id</text>
+    <rect x="530" y="135" width="200" height="120" rx="14" class="purple"/>
+    <text x="630" y="160" text-anchor="middle" class="bold">Трейс</text>
+    <text x="630" y="185" text-anchor="middle" class="mono">span: POST /pay 8.3s</text>
+    <text x="630" y="203" text-anchor="middle" class="mono">  span: db.query 12ms</text>
+    <text x="630" y="221" text-anchor="middle" class="mono">  span: bank.api 8.0s</text>
+    <text x="630" y="245" text-anchor="middle" class="muted">дерево спанів</text>
+    <path d="M230 195 L280 195" class="arrow dashed"/>
+    <path d="M530 195 L480 195" class="arrow dashed"/>
+    <text x="380" y="285" text-anchor="middle" class="muted">Метрика показує «сплеск 500-х» → exemplar веде до трейсу → trace_id веде до логів</text>
+  </svg>
+  <figcaption>Один запит породжує всі три види сигналів. Trace id — нитка, за яку ви тягнете від дашборда до конкретного рядка логу.</figcaption>
+</figure>
+
+<p>Типовий сценарій розслідування: на дашборді ви бачите, що частка помилок зросла (<b>метрика</b>). Клікаєте на точку графіка — Grafana показує приклад трейсу (exemplar). У <b>трейсі</b> видно, що 8 з 8,3 секунди пішли на виклик банку. Копіюєте trace id, шукаєте в <b>логах</b> — і бачите точний текст помилки від банку: «rate limit exceeded». Три стовпи, одна нитка.</p>
+
+<h2 id="s4">4. Логування правильно</h2>
+<h3>4.1. Структуровані логи замість «console.log("тут")»</h3>
+<p>Рядок <code>console.log("Помилка при оплаті користувача " + userId)</code> — це людський текст. Машина його не розпарсить: щоб знайти всі помилки оплат за годину для користувачів з України, доведеться писати регулярки. Структурований лог — це JSON з полями, які можна фільтрувати, групувати і рахувати:</p>
+<pre><code class="language-json">{"level":30,"time":1725900000123,"pid":42,"hostname":"api-7","service":"notes-api",
+ "req_id":"c1f2...","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","user_id":"u_8812",
+ "route":"POST /notes","status":201,"duration_ms":37,"msg":"note created"}</code></pre>
+<p>У Node.js стандартом де-факто є <a href="https://getpino.io/" target="_blank" rel="noopener">pino</a> — найшвидший JSON-логер (він серіалізує в окремому потоці й не блокує event loop). Базове налаштування:</p>
+<pre><code class="language-js">// logger.js — один логер на весь застосунок (ES modules, Node 20+)
+import pino from "pino";
+
+export const logger = pino({
+  level: process.env.LOG_LEVEL ?? "info",       // у проді info, локально debug
+  base: { service: "notes-api", version: process.env.APP_VERSION },
+  // redact — вирізаємо чутливі поля ДО запису. Пароль ніколи не має долетіти до диска.
+  redact: {
+    paths: ["req.headers.authorization", "req.headers.cookie", "*.password", "*.token", "*.card_number"],
+    censor: "[REDACTED]",
+  },
+  // у проді пишемо чистий JSON у stdout; локально — красиво через pino-pretty
+  transport: process.env.NODE_ENV === "production" ? undefined : { target: "pino-pretty" },
+});</code></pre>
+
+<h3>4.2. Рівні логування</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Рівень</th><th>Коли використовувати</th><th>Приклад</th></tr>
+<tr><td><code>fatal</code></td><td>Процес не може продовжити роботу</td><td>Не вдалось підключитись до БД при старті</td></tr>
+<tr><td><code>error</code></td><td>Операція провалилась, потрібна увага</td><td>Платіж відхилено через timeout банку</td></tr>
+<tr><td><code>warn</code></td><td>Щось дивне, але система впоралась</td><td>Retry спрацював з 3-ї спроби; кеш недоступний, читаємо з БД</td></tr>
+<tr><td><code>info</code></td><td>Бізнес-подія, важлива для аудиту</td><td>Користувач створив нотатку; сервіс стартував на порту 3000</td></tr>
+<tr><td><code>debug</code></td><td>Деталі для розробника; у проді вимкнено</td><td>SQL-запит з параметрами, тіло відповіді</td></tr>
+<tr><td><code>trace</code></td><td>Кожен крок; тільки локально</td><td>Вхід/вихід з кожної функції</td></tr>
+</table>
+</div>
+
+<h3>4.3. Що логувати і що НІ</h3>
+<p><b>Логуйте:</b> ідентифікатори (request id, user id, order id), результат операції, тривалість, назву зовнішнього сервісу, код помилки, версію застосунку. Все, що допоможе відповісти «що сталось із замовленням #4521».</p>
+<p><b>Ніколи не логуйте:</b></p>
+<ul>
+  <li><b>Паролі, токени, API-ключі, cookies, заголовок Authorization.</b> Логи читають десятки людей і зберігаються місяцями. Один витік логів = витік усіх сесій.</li>
+  <li><b>Персональні дані (PII, personally identifiable information):</b> повне ім'я, email, телефон, адреса, номер картки, паспорт. Це порушення GDPR і українського закону про захист персональних даних. Логуйте <code>user_id</code>, а не email.</li>
+  <li><b>Повні тіла запитів і відповідей</b> у проді — там майже завжди є PII, і це роздуває об'єм у рази.</li>
+</ul>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>Логи в циклі.</b> <code>for (const item of items) logger.info(item)</code> на 10 000 елементів — і ваш лог-агрегатор задихнувся, а рахунок за зберігання виріс удесятеро. Логуйте підсумок: «оброблено 10 000 елементів за 2,1 с, помилок 3».</li>
+    <li><b>Логування об'єктів помилок як рядків.</b> <code>logger.error("Помилка: " + err)</code> втрачає стек. Правильно: <code>logger.error({ err }, "payment failed")</code> — pino серіалізує <code>err.message</code>, <code>err.stack</code>, <code>err.code</code>.</li>
+    <li><b>Логи без контексту.</b> «Помилка з'єднання» — з чим? Для якого запиту? Завжди додавайте request id і назву залежності.</li>
+    <li><b>Синхронний запис у файл</b> блокує event loop. Пишіть у stdout, а збір нехай робить агент (Promtail, Fluent Bit) — це ще й «дванадцятифакторний» підхід (12-factor app).</li>
+  </ul>
+</div>
+
+<h3>4.4. Correlation / request id через middleware</h3>
+<p>Щоб зв'язати всі логи одного запиту, кожному запиту при вході призначаємо унікальний id і додаємо його в кожен рядок логу. У Node.js 20+ для цього є <code>AsyncLocalStorage</code> — «невидима валіза», яка їде з запитом через усі async-виклики без передавання параметром.</p>
+<pre><code class="language-js">// request-context.js
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+import { logger } from "./logger.js";
+
+export const als = new AsyncLocalStorage();
+
+// Express/Fastify-сумісний middleware
+export function requestContext(req, res, next) {
+  // Якщо клієнт або API gateway вже прислав id — переймаємо його, інакше генеруємо.
+  const reqId = req.headers["x-request-id"] ?? randomUUID();
+  res.setHeader("x-request-id", reqId);            // повертаємо клієнту для скарг у підтримку
+
+  // дочірній логер із прив'язаним req_id — кожен виклик автоматично матиме це поле
+  const reqLogger = logger.child({ req_id: reqId, route: `${req.method} ${req.path}` });
+  const start = performance.now();
+
+  res.on("finish", () =&gt; {
+    reqLogger.info({ status: res.statusCode, duration_ms: Math.round(performance.now() - start) }, "request done");
+  });
+
+  // усе, що виконається всередині next(), матиме доступ до als.getStore()
+  als.run({ reqId, logger: reqLogger }, next);
+}
+
+// Будь-де в коді (сервіс, репозиторій) — без прокидання параметрів:
+export const log = () =&gt; als.getStore()?.logger ?? logger;</code></pre>
+<pre><code class="language-js">// notes.service.js
+import { log } from "./request-context.js";
+
+export async function createNote(userId, dto) {
+  log().debug({ userId }, "creating note");
+  const note = await db.insert(notes).values({ ...dto, userId }).returning();
+  log().info({ note_id: note.id, user_id: userId }, "note created"); // req_id додасться сам
+  return note;
+}</code></pre>
+
+<h3>4.5. Централізований збір</h3>
+<p>Коли у вас 12 копій API на 4 серверах, заходити по SSH і читати файли — неможливо. Логи мають стікатись в одне місце.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Схема централізованого збору логів">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="30" width="150" height="50" rx="12" class="blue"/>
+    <text x="95" y="60" text-anchor="middle" class="small">notes-api ×3</text>
+    <rect x="20" y="100" width="150" height="50" rx="12" class="blue"/>
+    <text x="95" y="130" text-anchor="middle" class="small">auth-service ×2</text>
+    <rect x="20" y="170" width="150" height="50" rx="12" class="blue"/>
+    <text x="95" y="200" text-anchor="middle" class="small">worker ×4</text>
+    <text x="95" y="250" text-anchor="middle" class="muted">JSON → stdout</text>
+    <path d="M170 55 L250 120" class="arrow"/>
+    <path d="M170 125 L250 125" class="arrow"/>
+    <path d="M170 195 L250 130" class="arrow"/>
+    <rect x="255" y="95" width="130" height="60" rx="12" class="accent"/>
+    <text x="320" y="120" text-anchor="middle" class="bold">Агент</text>
+    <text x="320" y="140" text-anchor="middle" class="small">Promtail / Fluent Bit</text>
+    <text x="320" y="185" text-anchor="middle" class="muted">читає stdout контейнерів,</text>
+    <text x="320" y="200" text-anchor="middle" class="muted">додає labels, батчить</text>
+    <path d="M385 125 L465 125" class="arrow"/>
+    <rect x="470" y="95" width="130" height="60" rx="12" class="green"/>
+    <text x="535" y="120" text-anchor="middle" class="bold">Сховище</text>
+    <text x="535" y="140" text-anchor="middle" class="small">Loki / Elasticsearch</text>
+    <text x="535" y="185" text-anchor="middle" class="muted">індекс, retention,</text>
+    <text x="535" y="200" text-anchor="middle" class="muted">стиснення</text>
+    <path d="M600 125 L680 125" class="arrow"/>
+    <rect x="620" y="200" width="120" height="60" rx="12" class="purple"/>
+    <text x="680" y="225" text-anchor="middle" class="bold">UI</text>
+    <text x="680" y="245" text-anchor="middle" class="small">Grafana / Kibana</text>
+    <path d="M680 130 L680 200" class="arrow"/>
+    <text x="700" y="165" class="mono">LogQL</text>
+  </svg>
+  <figcaption>Застосунок пише в stdout і нічого не знає про сховище. Агент збирає, сховище індексує, UI дає запити на кшталт «усі error за 15 хв із trace_id=…».</figcaption>
+</figure>
+
+<p>Два популярні стеки: <b>ELK/EFK</b> (Elasticsearch + Logstash/Fluentd + Kibana) — потужний повнотекстовий пошук, але дорогий по пам'яті, бо індексує кожне слово; і <b>Grafana Loki</b> — індексує тільки мітки (labels: service, env, level), а текст зберігає стиснутим. Loki в 10 разів дешевший і чудово інтегрований з Grafana, тому для більшості команд це вибір за замовчуванням. Запит у LogQL виглядає так:</p>
+<pre><code class="language-text">{service="notes-api", env="prod"} |= "error" | json | duration_ms &gt; 1000</code></pre>
+
+<h2 id="s5">5. Метрики: типи, RED, USE, Prometheus</h2>
+<h3>5.1. Чотири типи метрик</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Тип</th><th>Що це</th><th>Приклад</th><th>Що можна робити</th></tr>
+<tr><td><b>Counter</b> (лічильник)</td><td>Число, яке тільки росте (скидається при рестарті)</td><td><code>http_requests_total</code>, <code>errors_total</code></td><td>Швидкість зростання: <code>rate()</code></td></tr>
+<tr><td><b>Gauge</b> (датчик)</td><td>Значення, що ходить вгору-вниз</td><td><code>memory_bytes</code>, <code>queue_length</code>, <code>active_connections</code></td><td>Поточне значення, min/max</td></tr>
+<tr><td><b>Histogram</b> (гістограма)</td><td>Розподіл значень по «кошиках» (buckets)</td><td><code>http_request_duration_seconds</code></td><td>Перцентилі p50/p95/p99 на сервері запитів, агрегуються між інстансами</td></tr>
+<tr><td><b>Summary</b></td><td>Перцентилі, обчислені на клієнті</td><td>Рідко; застаріває</td><td>Не агрегуються між інстансами — уникайте</td></tr>
+</table>
+</div>
+<p>Аналогія: counter — це лічильник пробігу в авто (тільки вгору). Gauge — стрілка рівня палива. Histogram — таблиця «скільки разів швидкість була 0–50, 50–90, 90–130».</p>
+
+<h3>5.2. RED для сервісів, USE для ресурсів</h3>
+<p>Що саме міряти? Дві мнемоніки, які покривають 90 % випадків.</p>
+<p><b>RED</b> (метод Тома Вілкі, Weaveworks) — для кожного <i>сервісу</i> або ендпоінту:</p>
+<ul>
+  <li><b>Rate</b> — скільки запитів за секунду.</li>
+  <li><b>Errors</b> — скільки з них провалилось.</li>
+  <li><b>Duration</b> — скільки часу зайняли (розподіл, не середнє!).</li>
+</ul>
+<p><b>USE</b> (метод Брендана Грегга) — для кожного <i>ресурсу</i> (CPU, диск, мережа, пул з'єднань):</p>
+<ul>
+  <li><b>Utilization</b> — наскільки завантажений (CPU 70 %).</li>
+  <li><b>Saturation</b> — наскільки переповнений, є черга (load average, довжина черги до пулу БД).</li>
+  <li><b>Errors</b> — помилки ресурсу (відкинуті пакети, помилки диска).</li>
+</ul>
+
+<h3>5.3. Prometheus: модель pull</h3>
+<p>Prometheus — стандарт для метрик. Незвична деталь: він не чекає, поки ви йому щось надішлете. Він сам <b>приходить і забирає</b> (pull) метрики з вашого ендпоінта <code>/metrics</code> раз на 15 секунд. Ваш застосунок просто тримає в пам'яті поточні значення і віддає їх текстом за запитом.</p>
+
+<figure>
+  <svg viewBox="0 0 760 290" role="img" aria-label="Prometheus pull модель">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="30" width="170" height="60" rx="12" class="blue"/>
+    <text x="105" y="55" text-anchor="middle" class="bold">notes-api:3000</text>
+    <text x="105" y="76" text-anchor="middle" class="mono">GET /metrics</text>
+    <rect x="20" y="110" width="170" height="60" rx="12" class="blue"/>
+    <text x="105" y="135" text-anchor="middle" class="bold">auth:3001</text>
+    <text x="105" y="156" text-anchor="middle" class="mono">GET /metrics</text>
+    <rect x="20" y="190" width="170" height="60" rx="12" class="blue"/>
+    <text x="105" y="215" text-anchor="middle" class="bold">node-exporter</text>
+    <text x="105" y="236" text-anchor="middle" class="mono">CPU, RAM, диск</text>
+    <path d="M330 130 L195 65" class="arrow"/>
+    <path d="M330 140 L195 140" class="arrow"/>
+    <path d="M330 150 L195 215" class="arrow"/>
+    <text x="262" y="100" text-anchor="middle" class="muted">scrape кожні 15 с</text>
+    <rect x="335" y="95" width="170" height="90" rx="12" class="accent"/>
+    <text x="420" y="122" text-anchor="middle" class="bold">Prometheus</text>
+    <text x="420" y="143" text-anchor="middle" class="small">TSDB (time series)</text>
+    <text x="420" y="163" text-anchor="middle" class="small">retention 15 днів</text>
+    <path d="M505 120 L585 90" class="arrow"/>
+    <path d="M505 160 L585 190" class="arrow"/>
+    <rect x="590" y="60" width="150" height="60" rx="12" class="purple"/>
+    <text x="665" y="85" text-anchor="middle" class="bold">Grafana</text>
+    <text x="665" y="106" text-anchor="middle" class="mono">PromQL → графіки</text>
+    <rect x="590" y="165" width="150" height="60" rx="12" class="red"/>
+    <text x="665" y="190" text-anchor="middle" class="bold">Alertmanager</text>
+    <text x="665" y="211" text-anchor="middle" class="small">Slack / PagerDuty</text>
+    <text x="380" y="270" text-anchor="middle" class="muted">Відповідь /metrics — простий текст: http_requests_total{route="/notes",status="200"} 1523</text>
+  </svg>
+  <figcaption>Pull-модель: сервіси нічого не «штовхають». Якщо Prometheus не може дістатись до сервісу — це саме по собі сигнал (метрика <code>up == 0</code>).</figcaption>
+</figure>
+
+<h3>5.4. prom-client у Node.js з гістограмою латентності</h3>
+<pre><code class="language-js">// metrics.js
+import client from "prom-client";
+
+export const registry = new client.Registry();
+registry.setDefaultLabels({ service: "notes-api" });
+client.collectDefaultMetrics({ register: registry }); // event loop lag, heap, GC — безкоштовно
+
+// RED: Rate + Errors — один counter з мітками
+export const httpRequests = new client.Counter({
+  name: "http_requests_total",
+  help: "Кількість HTTP-запитів",
+  labelNames: ["method", "route", "status"],
+  registers: [registry],
+});
+
+// RED: Duration — гістограма. Buckets підбираємо під очікувану латентність API.
+export const httpDuration = new client.Histogram({
+  name: "http_request_duration_seconds",
+  help: "Тривалість HTTP-запитів у секундах",
+  labelNames: ["method", "route", "status"],
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  registers: [registry],
+});
+
+// USE-приклад: gauge для пулу з'єднань БД
+export const dbPoolWaiting = new client.Gauge({
+  name: "db_pool_waiting_requests",
+  help: "Скільки запитів чекають вільного з'єднання (saturation)",
+  registers: [registry],
+});
+
+// middleware — вимірюємо кожен запит
+export function metricsMiddleware(req, res, next) {
+  const end = httpDuration.startTimer();
+  res.on("finish", () =&gt; {
+    // ВАЖЛИВО: route, а не req.path! /notes/123 і /notes/456 — одна мітка "/notes/:id",
+    // інакше кардинальність міток вибухне і Prometheus помре.
+    const route = req.route?.path ?? "unmatched";
+    const labels = { method: req.method, route, status: res.statusCode };
+    httpRequests.inc(labels);
+    end(labels);
+  });
+  next();
+}
+
+// ендпоінт для Prometheus
+export async function metricsHandler(req, res) {
+  res.setHeader("Content-Type", registry.contentType);
+  res.end(await registry.metrics());
+}</code></pre>
+
+<h3>5.5. PromQL: базові запити</h3>
+<pre><code class="language-text"># Rate: запитів за секунду по кожному route за останні 5 хв
+sum by (route) (rate(http_requests_total[5m]))
+
+# Errors: частка 5xx (0.02 = 2 %)
+sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+
+# Duration: p95 латентності по route (з гістограми)
+histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))
+
+# USE: saturation пулу БД
+max(db_pool_waiting_requests)
+
+# Чи всі інстанси живі
+up{job="notes-api"} == 0</code></pre>
+<p>Правило іменування (з офіційних best practices): <code>&lt;namespace&gt;_&lt;name&gt;_&lt;unit&gt;_total</code>. Одиниці — базові (seconds, bytes, не ms і не MB). Counter закінчується на <code>_total</code>. Мітки — низької кардинальності: <code>route</code> так, <code>user_id</code> — ніколи (мільйон унікальних значень = мільйон часових рядів).</p>
+
+<h3>5.6. Що має бути на дашборді Grafana</h3>
+<p>Один дашборд на сервіс, зверху вниз, від загального до деталей:</p>
+<ol>
+  <li><b>Рядок стану:</b> кількість живих інстансів (<code>up</code>), версія, uptime.</li>
+  <li><b>RED:</b> RPS по route, частка помилок (з горизонтальною лінією SLO), p50/p95/p99 латентності.</li>
+  <li><b>Залежності:</b> латентність і помилки викликів до БД, Redis, зовнішніх API.</li>
+  <li><b>USE ресурсів:</b> CPU, пам'ять heap, event loop lag, пул з'єднань, довжина черги.</li>
+  <li><b>Бізнес-метрики:</b> створених нотаток за хвилину, успішних оплат — саме вони покажуть «тихі» поломки, коли технічно все 200 OK, а користувачі нічого не можуть зробити.</li>
+</ol>
+
+<div class="box why">
+<div class="title">Чому це важливо</div>
+<p>Середнє значення латентності — брехня. Якщо 99 запитів по 10 мс і один по 10 секунд, середнє — 110 мс, «все нормально». Але один зі ста користувачів чекає 10 секунд і йде. Тому міряємо перцентилі: p99 = 10 с одразу покаже проблему. Гістограми дозволяють рахувати перцентилі по всіх інстансах разом, тому їх і обирають замість summary.</p>
+</div>
+
+<h2 id="s6">6. Трейсинг і OpenTelemetry</h2>
+<h3>6.1. Розподілений трейс</h3>
+<p>У мікросервісах один клік користувача проходить через 5–10 сервісів. Логи кожного окремо кажуть «у мене все добре за 20 мс». А користувач чекав 3 секунди. Де? Розподілений трейсинг (distributed tracing) відповідає на це: він збирає з усіх сервісів <b>спани (spans)</b> — відрізки часу з назвою, початком, кінцем і батьківським спаном — і складає їх у дерево.</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Дерево спанів одного трейсу через кілька сервісів">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="30" class="bold">trace_id: 4bf92f35 · загалом 1 240 мс</text>
+    <text x="640" y="30" class="muted">0 мс</text>
+    <text x="720" y="30" class="muted">1240</text>
+    <path d="M200 40 L740 40" class="arrow dashed"/>
+    <rect x="200" y="55" width="540" height="26" rx="6" class="accent"/>
+    <text x="24" y="73" class="mono">gateway  POST /orders</text>
+    <text x="470" y="73" text-anchor="middle" class="small">1240 мс</text>
+    <rect x="215" y="90" width="80" height="26" rx="6" class="blue"/>
+    <text x="40" y="108" class="mono">  auth  verify token</text>
+    <text x="255" y="108" text-anchor="middle" class="small">35 мс</text>
+    <rect x="300" y="125" width="430" height="26" rx="6" class="blue"/>
+    <text x="40" y="143" class="mono">  orders  create</text>
+    <text x="515" y="143" text-anchor="middle" class="small">1180 мс</text>
+    <rect x="310" y="160" width="60" height="26" rx="6" class="green"/>
+    <text x="56" y="178" class="mono">    db  INSERT orders</text>
+    <text x="340" y="178" text-anchor="middle" class="small">12</text>
+    <rect x="375" y="195" width="340" height="26" rx="6" class="red"/>
+    <text x="56" y="213" class="mono">    payments  charge</text>
+    <text x="545" y="213" text-anchor="middle" class="small">1090 мс ← ось він</text>
+    <rect x="385" y="230" width="320" height="26" rx="6" class="red"/>
+    <text x="72" y="248" class="mono">      http  bank.example</text>
+    <text x="545" y="248" text-anchor="middle" class="small">1070 мс (3 retry)</text>
+    <rect x="718" y="265" width="12" height="26" rx="6" class="purple"/>
+    <text x="56" y="283" class="mono">    queue  publish order.created</text>
+    <text x="700" y="283" text-anchor="end" class="small">2 мс</text>
+    <text x="380" y="318" text-anchor="middle" class="muted">Кожен рядок — span. Вкладеність = parent_span_id. Ширина = тривалість. Червоне = де болить.</text>
+  </svg>
+  <figcaption>Waterfall-подання трейсу (так виглядає в Jaeger/Tempo). За секунду видно, що 88 % часу — очікування банку.</figcaption>
+</figure>
+
+<h3>6.2. Концепції OpenTelemetry</h3>
+<p><a href="https://opentelemetry.io/" target="_blank" rel="noopener">OpenTelemetry (OTel)</a> — відкритий стандарт і набір SDK для збору трейсів, метрик і логів. Головна перевага: інструментуєте код один раз, а бекенд (Jaeger, Tempo, Datadog, Honeycomb) можете міняти без зміни коду.</p>
+<ul>
+  <li><b>Tracer</b> — фабрика спанів для вашого сервісу. <code>tracer.startActiveSpan("createOrder", …)</code>.</li>
+  <li><b>Span</b> — одиниця роботи: назва, час старту/кінця, атрибути (<code>db.statement</code>, <code>http.status_code</code>), події, статус (OK/ERROR), посилання на батька.</li>
+  <li><b>Context propagation</b> — передавання «хто мій батько» між сервісами. Всередині процесу — через AsyncLocalStorage (той самий механізм, що ми використали для логів). Між процесами — через HTTP-заголовки або метадані повідомлення в черзі.</li>
+  <li><b>W3C Trace Context</b> — стандартний заголовок <code>traceparent</code>. Формат: <code>00-&lt;trace_id 32 hex&gt;-&lt;parent_span_id 16 hex&gt;-&lt;flags&gt;</code>. Приклад: <code>traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01</code>. Останній байт <code>01</code> означає «цей трейс семплюється» — усі сервіси нижче теж його збережуть.</li>
+  <li><b>Exporter</b> — куди відправляти: OTLP (стандартний протокол OpenTelemetry) до колектора або напряму до Jaeger/Tempo.</li>
+  <li><b>Collector</b> — окремий процес-посередник: приймає телеметрію, батчить, семплює, збагачує і пересилає в кілька бекендів. Застосунок знову нічого не знає про сховище.</li>
+</ul>
+
+<figure>
+  <svg viewBox="0 0 760 240" role="img" aria-label="Передавання контексту трейсу між сервісами через заголовок traceparent">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="60" width="160" height="80" rx="12" class="blue"/>
+    <text x="100" y="90" text-anchor="middle" class="bold">gateway</text>
+    <text x="100" y="112" text-anchor="middle" class="mono">span A (root)</text>
+    <path d="M180 100 L290 100" class="arrow"/>
+    <text x="235" y="80" text-anchor="middle" class="mono">traceparent:</text>
+    <text x="235" y="125" text-anchor="middle" class="mono">00-4bf9…-A-01</text>
+    <rect x="295" y="60" width="160" height="80" rx="12" class="green"/>
+    <text x="375" y="90" text-anchor="middle" class="bold">orders</text>
+    <text x="375" y="112" text-anchor="middle" class="mono">span B, parent=A</text>
+    <path d="M455 100 L565 100" class="arrow"/>
+    <text x="510" y="80" text-anchor="middle" class="mono">traceparent:</text>
+    <text x="510" y="125" text-anchor="middle" class="mono">00-4bf9…-B-01</text>
+    <rect x="570" y="60" width="160" height="80" rx="12" class="purple"/>
+    <text x="650" y="90" text-anchor="middle" class="bold">payments</text>
+    <text x="650" y="112" text-anchor="middle" class="mono">span C, parent=B</text>
+    <path d="M375 140 L375 190" class="arrow dashed"/>
+    <rect x="295" y="192" width="160" height="34" rx="10" class="accent"/>
+    <text x="375" y="214" text-anchor="middle" class="small">RabbitMQ: headers.traceparent</text>
+    <text x="100" y="180" text-anchor="middle" class="muted">trace_id однаковий</text>
+    <text x="100" y="197" text-anchor="middle" class="muted">у всіх трьох</text>
+  </svg>
+  <figcaption>Заголовок <code>traceparent</code> — «естафетна паличка»: кожен сервіс читає його, створює свій span із parent = попередній, і передає далі (у HTTP, gRPC або повідомлення черги).</figcaption>
+</figure>
+
+<h3>6.3. Авто-інструментування Node.js</h3>
+<p>Найкраща новина: для Express/Fastify, pg, mysql, redis, http, amqplib та ще сотні бібліотек OTel уміє створювати спани <b>автоматично</b>, без зміни бізнес-коду.</p>
+<pre><code class="language-bash">npm i @opentelemetry/sdk-node @opentelemetry/auto-instrumentations-node \
+      @opentelemetry/exporter-trace-otlp-http @opentelemetry/exporter-metrics-otlp-http</code></pre>
+<pre><code class="language-js">// instrumentation.js — має завантажитись ПЕРШИМ, до імпорту express/pg
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+
+const sdk = new NodeSDK({
+  resource: resourceFromAttributes({
+    [ATTR_SERVICE_NAME]: "notes-api",
+    [ATTR_SERVICE_VERSION]: process.env.APP_VERSION ?? "dev",
+  }),
+  // OTLP/HTTP до колектора; адресу можна також задати через OTEL_EXPORTER_OTLP_ENDPOINT
+  traceExporter: new OTLPTraceExporter({ url: "http://otel-collector:4318/v1/traces" }),
+  metricReader: new PeriodicExportingMetricReader({
+    exporter: new OTLPMetricExporter({ url: "http://otel-collector:4318/v1/metrics" }),
+  }),
+  instrumentations: [getNodeAutoInstrumentations({
+    // fs генерує тонни шуму — вимикаємо
+    "@opentelemetry/instrumentation-fs": { enabled: false },
+  })],
+});
+
+sdk.start();
+process.on("SIGTERM", () =&gt; sdk.shutdown().finally(() =&gt; process.exit(0)));</code></pre>
+<pre><code class="language-bash"># Запуск: підвантажуємо інструментування до основного модуля
+node --import ./instrumentation.js ./server.js</code></pre>
+<p>Ручний span для важливої бізнес-операції (і зв'язок із логами):</p>
+<pre><code class="language-js">import { trace, SpanStatusCode } from "@opentelemetry/api";
+const tracer = trace.getTracer("notes-api");
+
+export async function chargeOrder(order) {
+  return tracer.startActiveSpan("payments.charge", async (span) =&gt; {
+    span.setAttribute("order.id", order.id);
+    span.setAttribute("order.amount_cents", order.amountCents);
+    try {
+      const result = await bankClient.charge(order);   // http-span створиться автоматично як дитина
+      span.setAttribute("bank.tx_id", result.txId);
+      return result;
+    } catch (err) {
+      span.recordException(err);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+      throw err;
+    } finally {
+      span.end();
+    }
+  });
+}
+
+// Додаємо trace_id у кожен рядок логу pino — це і є «нитка» між стовпами
+import pino from "pino";
+export const logger = pino({
+  mixin() {
+    const ctx = trace.getActiveSpan()?.spanContext();
+    return ctx ? { trace_id: ctx.traceId, span_id: ctx.spanId } : {};
+  },
+});</code></pre>
+<p>Бекенди для трейсів: <b>Jaeger</b> — класика від Uber, зручний UI, простий для локальної розробки; <b>Grafana Tempo</b> — зберігає трейси в object storage (S3), дешевий на великих об'ємах, ідеально працює в парі з Loki/Prometheus в одній Grafana.</p>
+
+<h2 id="s7">7. SLI, SLO, SLA, error budget і алерти</h2>
+<h3>7.1. Три букви простими словами</h3>
+<ul>
+  <li><b>SLI</b> (service level indicator) — <i>що ми міряємо</i>. Наприклад: «частка успішних запитів» або «частка запитів швидших за 300 мс».</li>
+  <li><b>SLO</b> (service level objective) — <i>яку ціль ставимо собі</i>. «99,9 % запитів успішні за 30 днів». Це внутрішня обіцянка команди.</li>
+  <li><b>SLA</b> (service level agreement) — <i>що обіцяємо клієнту в договорі</i> зі штрафами. Зазвичай м'якіше за SLO (SLA 99,5 %, SLO 99,9 %), щоб мати запас.</li>
+</ul>
+<p>Скільки це — 99,9 %? У місяці ~43 200 хвилин. 0,1 % від них — <b>43 хвилини</b>. Тобто три дев'ятки дозволяють вам «лежати» 43 хвилини на місяць. 99,99 % — 4,3 хвилини. 99 % — 7,2 години.</p>
+
+<h3>7.2. Error budget і burn rate</h3>
+<p>Ці 43 хвилини — ваш <b>бюджет помилок (error budget)</b>. Це геніальна ідея з Google SRE: надійність — не «якомога більше», а «рівно стільки, скільки обіцяли». Поки бюджет не витрачений — команда може ризикувати: деплоїти частіше, експериментувати. Бюджет вичерпано — стоп фічі, тільки надійність. Це припиняє вічну війну «розробники хочуть релізити, ops хочуть стабільності».</p>
+<p><b>Burn rate</b> — швидкість витрачання бюджету. Burn rate 1 = витратимо рівно за 30 днів. Burn rate 14,4 = витратимо весь місячний бюджет за 2 години. Саме на burn rate будують сучасні алерти:</p>
+<pre><code class="language-yaml"># prometheus alert rule: швидке спалювання бюджету (page негайно)
+- alert: HighErrorBudgetBurn
+  expr: |
+    (sum(rate(http_requests_total{status=~"5.."}[1h])) / sum(rate(http_requests_total[1h]))) &gt; (14.4 * 0.001)
+    and
+    (sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))) &gt; (14.4 * 0.001)
+  for: 2m
+  labels: { severity: page }
+  annotations:
+    summary: "Error budget згорить за 2 год — {{ $value | humanizePercentage }} помилок"
+    runbook: "https://wiki.example/runbooks/high-error-rate"</code></pre>
+<p>Два вікна (1 год і 5 хв) — щоб алерт не спрацьовував на короткий сплеск, але й швидко замовкав, коли проблему виправлено.</p>
+
+<figure>
+  <svg viewBox="0 0 760 260" role="img" aria-label="Error budget: витрачання протягом місяця">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <path d="M60 220 L720 220" class="arrow"/>
+    <path d="M60 220 L60 30" class="arrow"/>
+    <text x="700" y="245" text-anchor="end" class="muted">дні місяця →</text>
+    <text x="20" y="40" class="muted">бюджет</text>
+    <text x="20" y="55" class="muted">43 хв</text>
+    <text x="30" y="224" class="muted">0</text>
+    <path d="M60 50 L720 50" class="arrow dashed"/>
+    <text x="80" y="45" class="small">100 % бюджету</text>
+    <path d="M60 50 L200 65 L210 120 L400 135 L410 190 L600 200 L720 205" style="fill:none;stroke:var(--red);stroke-width:2.5"/>
+    <text x="205" y="100" class="small">інцидент #1: −13 хв</text>
+    <text x="405" y="170" class="small">інцидент #2: −13 хв</text>
+    <path d="M600 200 L720 60" style="fill:none;stroke:var(--green);stroke-width:2;stroke-dasharray:6 5"/>
+    <text x="650" y="120" text-anchor="middle" class="small">залишок ≈ 4 хв</text>
+    <text x="650" y="137" text-anchor="middle" class="small">→ фіча-фриз</text>
+    <rect x="240" y="70" width="140" height="22" rx="8" class="green"/>
+    <text x="310" y="86" text-anchor="middle" class="small">бюджет є: деплоїмо</text>
+  </svg>
+  <figcaption>Error budget — «гаманець надійності». Кожен інцидент його зменшує; майже порожній гаманець означає стоп ризикованим змінам до кінця вікна.</figcaption>
+</figure>
+
+<h3>7.3. Алерти на симптоми, а не на причини</h3>
+<p>Погано: «CPU &gt; 80 %». Це причина, і вона може бути нормою (нічний батч). Добре: «p99 латентність &gt; 1 с» або «частка помилок &gt; SLO». Це симптом — те, що відчуває користувач. Алерт має будити людину тільки тоді, коли <b>користувач страждає або скоро страждатиме</b>, і тільки якщо потрібна дія людини. Все інше — на дашборд або в тикет, не в телефон.</p>
+<p><b>Alert fatigue</b> (втома від алертів) — коли на телефон приходить 40 повідомлень на день, з яких 38 «само минулось». Через місяць інженер перестає їх читати і пропускає справжнє падіння. Ліки: кожен алерт має бути (1) actionable — є що зробити, (2) з runbook'ом, (3) переглянутий після кожного спрацювання: «чи був він корисним? ні — видалити або підняти поріг».</p>
+
+<h3>7.4. On-call і runbook'и</h3>
+<p><b>On-call</b> — чергування: один інженер тиждень отримує алерти 24/7 (з компенсацією!). <b>Runbook</b> — інструкція для кожного алерту: що це означає, які дашборди відкрити, що перевірити першим, як мітигувати (перезапустити, відкотити, ввімкнути feature flag), кого ескалювати. Runbook пишуть так, щоб о 3-й ночі його міг виконати новачок. Якщо runbook зводиться до «запустити скрипт» — автоматизуйте і видаліть алерт.</p>
+
+<h2 id="s8">8. Health checks, профілювання, «золоті сигнали»</h2>
+<h3>8.1. Liveness і readiness</h3>
+<p>Оркестратор (Kubernetes, Docker Swarm, навіть балансувальник) має знати, чи здорова копія. Два різні питання:</p>
+<ul>
+  <li><b>Liveness</b> «ти живий?» — процес не завис. Якщо ні — перезапустити. Має бути максимально простий: повернути 200 без звернень до БД (інакше падіння БД перезапустить усі копії API — і стане гірше).</li>
+  <li><b>Readiness</b> «ти готовий приймати трафік?» — з'єднання з БД є, кеш прогрітий, міграції пройшли. Якщо ні — тимчасово прибрати з балансувальника, але не вбивати.</li>
+</ul>
+<pre><code class="language-js">app.get("/healthz", (req, res) =&gt; res.json({ status: "ok" }));      // liveness
+
+app.get("/readyz", async (req, res) =&gt; {                                 // readiness
+  const checks = await Promise.allSettled([
+    db.execute(sql`select 1`),
+    redis.ping(),
+  ]);
+  const ok = checks.every(c =&gt; c.status === "fulfilled");
+  res.status(ok ? 200 : 503).json({
+    status: ok ? "ready" : "not ready",
+    db: checks[0].status, redis: checks[1].status,
+  });
+});</code></pre>
+
+<h3>8.2. Continuous profiling</h3>
+<p>Метрики кажуть «CPU 95 %», трейс каже «цей span довгий», але <i>яка саме функція</i> їсть процесор? Профілювання (profiling) відповідає: воно періодично «фотографує» стек викликів. Раніше профілювали тільки локально, бо це дорого. Сучасні інструменти (Pyroscope від Grafana, Parca, Datadog Continuous Profiler) беруть ~1–2 % CPU і працюють у проді постійно, показуючи flame graph за будь-який період: «у вівторок о 14:00 40 % часу пішло на <code>JSON.parse</code> у <code>parseWebhook</code>». У Node.js це робиться через <code>@pyroscope/nodejs</code> або вбудований <code>--cpu-prof</code>.</p>
+
+<h3>8.3. Чотири золоті сигнали Google SRE</h3>
+<p>Книга Google SRE звужує все до чотирьох сигналів, які має мати кожен сервіс. Якщо ви можете міряти тільки чотири речі — міряйте ці:</p>
+<ol>
+  <li><b>Latency</b> (латентність) — час обслуговування. Окремо для успішних і невдалих запитів (швидка 500-ка — не привід радіти).</li>
+  <li><b>Traffic</b> (трафік) — навантаження: RPS, повідомлень у секунду, одночасних сесій.</li>
+  <li><b>Errors</b> (помилки) — явні (500), неявні (200 із неправильним вмістом), за політикою (повільніші за 1 с).</li>
+  <li><b>Saturation</b> (насичення) — наскільки «повна» система; прогноз «через 4 години закінчиться диск».</li>
+</ol>
+<p>Помітили? Це RED + saturation з USE. Усі мнемоніки говорять про одне.</p>
+
+<h2 id="s9">9. Інцидент: від виявлення до postmortem</h2>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Життєвий цикл інциденту">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="15" y="60" width="130" height="70" rx="12" class="red"/>
+    <text x="80" y="88" text-anchor="middle" class="bold">Detect</text>
+    <text x="80" y="110" text-anchor="middle" class="small">алерт / скарга</text>
+    <path d="M145 95 L165 95" class="arrow"/>
+    <rect x="168" y="60" width="130" height="70" rx="12" class="accent"/>
+    <text x="233" y="88" text-anchor="middle" class="bold">Triage</text>
+    <text x="233" y="110" text-anchor="middle" class="small">severity, командир</text>
+    <path d="M298 95 L318 95" class="arrow"/>
+    <rect x="321" y="60" width="130" height="70" rx="12" class="blue"/>
+    <text x="386" y="88" text-anchor="middle" class="bold">Mitigate</text>
+    <text x="386" y="110" text-anchor="middle" class="small">зупинити біль</text>
+    <path d="M451 95 L471 95" class="arrow"/>
+    <rect x="474" y="60" width="130" height="70" rx="12" class="green"/>
+    <text x="539" y="88" text-anchor="middle" class="bold">Resolve</text>
+    <text x="539" y="110" text-anchor="middle" class="small">усунути причину</text>
+    <path d="M604 95 L624 95" class="arrow"/>
+    <rect x="627" y="60" width="120" height="70" rx="12" class="purple"/>
+    <text x="687" y="88" text-anchor="middle" class="bold">Postmortem</text>
+    <text x="687" y="110" text-anchor="middle" class="small">вивчити урок</text>
+    <path d="M687 130 Q687 200 80 200 Q40 200 40 135" class="arrow dashed"/>
+    <text x="380" y="190" text-anchor="middle" class="muted">action items → нові алерти, runbook'и, автоматизація → наступний інцидент виявляється раніше</text>
+    <text x="80" y="40" text-anchor="middle" class="muted">MTTD</text>
+    <text x="460" y="40" text-anchor="middle" class="muted">MTTR (час до відновлення)</text>
+    <path d="M150 45 L600 45" class="arrow dashed"/>
+  </svg>
+  <figcaption>Ключова ідея: спершу <b>mitigate</b> (відкотити, вимкнути фічу, збільшити копії), а вже потім шукати першопричину. Користувачам байдуже, чому лежить — важливо, щоб піднялось.</figcaption>
+</figure>
+
+<p><b>Ролі під час інциденту</b> (з PagerDuty guide): командир інциденту (incident commander) — приймає рішення і не лізе в код; комунікатор — пише оновлення в статус-канал кожні 15 хвилин; технічні лідери — власне чинять. Один канал у Slack на інцидент, одна нитка правди.</p>
+
+<h3>Blameless postmortem</h3>
+<p>Після кожного серйозного інциденту — розбір без пошуку винних (blameless). Не «Петро зламав прод», а «система дозволила задеплоїти без перевірки міграції». Люди роблять помилки завжди; питання — чому система їх не спіймала. Шаблон:</p>
+<pre><code class="language-markdown"># Postmortem: оплати не проходили 47 хв (2026-09-02)
+
+**Severity:** SEV-2   **Тривалість:** 03:12–03:59 UTC   **Автор:** черговий
+**Вплив:** ~1 200 користувачів не змогли оплатити; втрачено ≈ 340 замовлень; error budget −47 хв із 43 (перевитрата).
+
+## Хронологія (UTC)
+- 03:10 деплой payments v2.14 (нова бібліотека http-клієнта)
+- 03:12 алерт HighErrorBudgetBurn → page черговому
+- 03:18 черговий підтвердив: p99 payments 9 с, банк відповідає 200
+- 03:31 знайдено в трейсі: новий клієнт не передає timeout, retry ×3 по 3 с
+- 03:40 відкат до v2.13 (mitigate)
+- 03:59 помилки 0, інцидент закрито
+
+## Першопричина (root cause)
+Нова версія http-клієнта змінила дефолтний timeout з 3 с на «без обмеження». Тест на timeout відсутній.
+
+## Що спрацювало добре
+Алерт спрацював за 2 хв; трейс показав причину за 13 хв.
+
+## Що не спрацювало
+Відкат зайняв 9 хв через ручний процес; канарейкового деплою немає.
+
+## Action items
+| Дія | Власник | Дедлайн |
+| Явний timeout у всіх зовнішніх клієнтах + тест | @orders-team | 09-09 |
+| Канарейковий деплой 5 % на 10 хв для payments | @platform | 09-20 |
+| Кнопка «rollback» в один клік у CI | @platform | 09-20 |</code></pre>
+
+<h2 id="s10">10. Вартість observability і семплінг</h2>
+<p>Телеметрія коштує грошей, і іноді більше за самі сервери. Типовий рахунок: логи — за гігабайт індексування і зберігання; метрики — за кількість активних часових рядів; трейси — за кількість спанів. Три важелі економії:</p>
+<ol>
+  <li><b>Кардинальність метрик.</b> Метрика з міткою <code>user_id</code> на 1 млн користувачів = 1 млн часових рядів × кожен статус × кожен route. Prometheus впаде, Datadog виставить рахунок з п'ятьма нулями. Мітки — тільки з десятками, максимум сотнями значень.</li>
+  <li><b>Рівні логів і retention.</b> Debug у проді вимкнено. Info зберігаємо 14 днів, error — 90. Sampling для повторюваних info-логів («request done» — логуйте кожен, але не 5 разів).</li>
+  <li><b>Семплінг трейсів.</b> Зберігати 100 % трейсів при 10 000 RPS — це десятки терабайт на день. Варіанти:
+    <ul>
+      <li><b>Head-based sampling</b>: рішення на початку (у gateway): «зберігаємо 5 % трейсів». Просто, але 95 % помилок теж викине.</li>
+      <li><b>Tail-based sampling</b>: колектор чекає завершення трейсу і зберігає його, якщо він має помилку або довгий, а з успішних швидких — 1 %. Дорожче за пам'яттю колектора, але зберігає все цікаве. Налаштовується у OTel Collector через <code>tail_sampling</code> processor.</li>
+    </ul>
+  </li>
+</ol>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p><b>Wide events / канонічні логи.</b> Чаріті Мейджорс (Honeycomb) пропонує замість десяти маленьких логів на запит писати <b>одну широку подію</b> в кінці запиту з 50–100 полями: user_id, plan, feature flags, tenant, cache hit/miss, кожна тривалість залежності, версія збірки. Тоді будь-яке питання типу «чи повільніше для тенантів на плані Pro з увімкненим прапором X після деплою v2.14» — це один фільтр, а не кореляція між джерелами. Об'єм менший, ніж у 10 рядків, а цінність вища. OTel-спан з багатими атрибутами — це і є така wide event. Другий рівень: <b>exemplars</b> у Prometheus — до кожного кошика гістограми прикріплюється trace_id одного з запитів, і в Grafana ви клікаєте на точку графіка й одразу відкриваєте трейс.</p>
+</div>
+
+<h2 id="s11">11. Практика: pino + prom-client + OTel + Grafana через Docker Compose</h2>
+<p>Візьмемо API нотаток із розділу 04/09 і додамо повний стек за один вечір. Структура:</p>
+<pre><code class="language-text">notes-api/
+├── src/
+│   ├── instrumentation.js   # OTel SDK (з розділу 6.3)
+│   ├── logger.js            # pino з mixin trace_id
+│   ├── metrics.js           # prom-client (з розділу 5.4)
+│   ├── request-context.js   # request id через AsyncLocalStorage
+│   └── server.js
+├── observability/
+│   ├── prometheus.yml
+│   ├── otel-collector.yml
+│   ├── promtail.yml
+│   └── grafana-datasources.yml
+├── docker-compose.yml
+└── Dockerfile</code></pre>
+
+<pre><code class="language-js">// src/server.js
+import express from "express";
+import { logger } from "./logger.js";
+import { requestContext, log } from "./request-context.js";
+import { metricsMiddleware, metricsHandler } from "./metrics.js";
+
+const app = express();
+app.use(express.json());
+app.use(requestContext);
+app.use(metricsMiddleware);
+
+app.get("/metrics", metricsHandler);
+app.get("/healthz", (_, res) =&gt; res.json({ status: "ok" }));
+
+const notes = new Map();
+app.post("/notes", (req, res) =&gt; {
+  const id = crypto.randomUUID();
+  notes.set(id, { id, ...req.body });
+  log().info({ note_id: id }, "note created");
+  res.status(201).json(notes.get(id));
+});
+app.get("/notes/:id", async (req, res) =&gt; {
+  // штучна повільність для демонстрації p99 на дашборді
+  if (Math.random() &lt; 0.05) await new Promise(r =&gt; setTimeout(r, 1500));
+  const note = notes.get(req.params.id);
+  if (!note) { log().warn({ note_id: req.params.id }, "note not found"); return res.status(404).end(); }
+  res.json(note);
+});
+
+app.listen(3000, () =&gt; logger.info({ port: 3000 }, "notes-api started"));</code></pre>
+
+<pre><code class="language-yaml"># docker-compose.yml
+services:
+  notes-api:
+    build: .
+    command: node --import ./src/instrumentation.js ./src/server.js
+    environment:
+      NODE_ENV: production
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    ports: ["3000:3000"]
+    labels: { logging: "promtail" }
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otel.yml"]
+    volumes: ["./observability/otel-collector.yml:/etc/otel.yml"]
+    ports: ["4318:4318"]
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes: ["./observability/tempo.yml:/etc/tempo.yml"]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes: ["./observability/prometheus.yml:/etc/prometheus/prometheus.yml"]
+    ports: ["9090:9090"]
+
+  loki:
+    image: grafana/loki:3.2.0
+    ports: ["3100:3100"]
+
+  promtail:
+    image: grafana/promtail:3.2.0
+    volumes:
+      - ./observability/promtail.yml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["-config.file=/etc/promtail/config.yml"]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes: ["./observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/ds.yml"]
+    ports: ["3001:3000"]</code></pre>
+
+<pre><code class="language-yaml"># observability/prometheus.yml
+global: { scrape_interval: 15s }
+scrape_configs:
+  - job_name: notes-api
+    static_configs: [{ targets: ["notes-api:3000"] }]
+  - job_name: otel-collector
+    static_configs: [{ targets: ["otel-collector:8888"] }]
+
+# observability/otel-collector.yml
+receivers:
+  otlp: { protocols: { http: { endpoint: 0.0.0.0:4318 } } }
+processors:
+  batch: {}
+  tail_sampling:            # зберігаємо всі помилки/повільні, 10 % решти
+    policies:
+      - { name: errors, type: status_code, status_code: { status_codes: [ERROR] } }
+      - { name: slow, type: latency, latency: { threshold_ms: 1000 } }
+      - { name: rest, type: probabilistic, probabilistic: { sampling_percentage: 10 } }
+exporters:
+  otlp/tempo: { endpoint: tempo:4317, tls: { insecure: true } }
+  prometheus: { endpoint: 0.0.0.0:8889 }
+service:
+  pipelines:
+    traces:  { receivers: [otlp], processors: [tail_sampling, batch], exporters: [otlp/tempo] }
+    metrics: { receivers: [otlp], processors: [batch], exporters: [prometheus] }
+
+# observability/promtail.yml
+server: { http_listen_port: 9080 }
+clients: [{ url: http://loki:3100/loki/api/v1/push }]
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs: [{ host: unix:///var/run/docker.sock }]
+    relabel_configs:
+      - { source_labels: [__meta_docker_container_name], target_label: service }
+    pipeline_stages:
+      - json: { expressions: { level: level, trace_id: trace_id } }
+      - labels: { level: "" }
+
+# observability/grafana-datasources.yml
+apiVersion: 1
+datasources:
+  - { name: Prometheus, type: prometheus, url: http://prometheus:9090, isDefault: true }
+  - { name: Loki, type: loki, url: http://loki:3100,
+      jsonData: { derivedFields: [{ name: TraceID, matcherRegex: '"trace_id":"(\w+)"', url: '$${__value.raw}', datasourceUid: tempo }] } }
+  - { name: Tempo, type: tempo, uid: tempo, url: http://tempo:3200 }</code></pre>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Скопіюй структуру вище, запусти <code>docker compose up -d</code>. Перевір <code>curl localhost:3000/metrics</code> — має бути текст із <code>http_requests_total</code>.</li>
+    <li>Згенеруй трафік: <code>for i in $(seq 1 500); do curl -s localhost:3000/notes/$(uuidgen) &gt; /dev/null; done</code>. Половина буде 404, 5 % — повільні.</li>
+    <li>Відкрий Grafana (<code>localhost:3001</code>) → Explore → Prometheus. Введи <code>histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[1m])))</code>. Побачиш p99 ≈ 1,5 с.</li>
+    <li>Перемкнись на Loki: <code>{service=~".*notes-api.*"} | json | level="warn"</code>. Клікни на trace_id у рядку — Grafana відкриє трейс у Tempo. Це і є «нитка».</li>
+    <li>Створи дашборд із трьох панелей: RPS, error rate, p95 — і збережи його як JSON у репозиторій (dashboards as code).</li>
+  </ol>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам: алерт і runbook</div>
+  <ol>
+    <li>Додай у Prometheus файл правил з алертом <code>HighErrorBudgetBurn</code> із розділу 7.2 і <code>InstanceDown: up == 0 for 1m</code>.</li>
+    <li>Підніми Alertmanager у compose і налаштуй webhook на тестовий endpoint (наприклад, <code>webhook.site</code>) або Slack.</li>
+    <li>Зупини notes-api (<code>docker compose stop notes-api</code>) і виміряй час до алерту. Це твій MTTD.</li>
+    <li>Напиши runbook для <code>InstanceDown</code> на 10 рядків: що перевірити (логи останніх 5 хв, чи був деплой, чи є пам'ять), як мітигувати (<code>docker compose restart</code>), кого будити.</li>
+    <li>Проведи «інцидент» навмисно: задеплой версію, що завжди відповідає 500, і пройди повний цикл detect → mitigate → postmortem за шаблоном.</li>
+  </ol>
+</div>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>Інструментування завантажене надто пізно.</b> Якщо <code>express</code> імпортовано до <code>sdk.start()</code>, авто-спани не з'являться. Використовуйте <code>--import</code> або <code>--require</code>, не звичайний імпорт зверху файлу.</li>
+    <li><b>Дашборд без SLO-лінії.</b> Графік «error rate 0,3 %» нічого не каже. Додайте горизонтальну лінію порогу 0,1 % — і одразу видно «ми в червоному».</li>
+    <li><b>Health check, що перевіряє все.</b> Liveness із запитом до БД + падіння БД = каскадний рестарт усіх копій.</li>
+    <li><b>Метрики за <code>req.path</code> замість <code>route</code>.</b> Мільйон унікальних шляхів — і Prometheus з'їсть усю пам'ять. Це найпоширеніша помилка новачків.</li>
+    <li><b>Секрети в трейсах.</b> Авто-інструментування http може записати query string із токеном. Налаштуйте <code>ignoreIncomingRequestHook</code> / redaction атрибутів у колекторі.</li>
+  </ul>
+</div>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Observability — не «DevOps-штука», яку хтось інший налаштує. Це частина коду, який ви пишете: кожен <code>logger.info</code>, кожна мітка метрики, кожен атрибут спана — це рішення розробника. На співбесіді на middle+ обов'язково запитають: «Як ви дізнаєтесь, що ваш сервіс зламався, раніше за користувачів?» Правильна відповідь — цей розділ.</p>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим observability відрізняється від monitoring?</summary><p>Monitoring відповідає на заздалегідь відомі питання через заздалегідь поставлені датчики і алерти (known unknowns). Observability — це здатність системи давати відповіді на нові, непередбачені питання за її зовнішніми сигналами (unknown unknowns), завдяки багатим структурованим даним: логам із полями, трейсам з атрибутами.</p></details>
+  <details><summary>2. Чому не варто логувати email користувача, а замість цього user_id?</summary><p>Email — персональні дані (PII). Логи зберігаються довго, до них має доступ багато людей, вони часто потрапляють у сторонні сервіси. Витік логів стає витоком PII (порушення GDPR). user_id — непрямий ідентифікатор, за яким можна знайти користувача в захищеній базі, але сам по собі він нічого не розкриває.</p></details>
+  <details><summary>3. Що таке кардинальність міток і чому мітка <code>user_id</code> у Prometheus — погана ідея?</summary><p>Кардинальність — кількість унікальних комбінацій значень міток. Кожна комбінація = окремий часовий ряд у пам'яті. user_id на мільйон користувачів × routes × statuses дасть мільйони рядів, Prometheus вичерпає пам'ять, а SaaS-провайдер виставить величезний рахунок. Мітки мають мати десятки-сотні значень.</p></details>
+  <details><summary>4. Скільки хвилин простою на місяць дозволяє SLO 99,9 %? А 99,99 %?</summary><p>30 днів ≈ 43 200 хвилин. 0,1 % = 43,2 хвилини. 0,01 % = 4,32 хвилини. Кожна додаткова дев'ятка — у 10 разів жорсткіше і зазвичай у рази дорожче.</p></details>
+  <details><summary>5. Чому алерт «CPU &gt; 80 %» гірший за «p99 латентність &gt; 1 с»?</summary><p>CPU — це причина, і високий CPU може бути нормою (батч-обробка) або взагалі не впливати на користувача. p99 латентності — симптом, який відчуває користувач. Алерти на симптоми будять людину тільки коли є реальний вплив; алерти на причини створюють шум і alert fatigue.</p></details>
+  <details><summary>6. Як trace id потрапляє з сервісу A в сервіс B через HTTP?</summary><p>Через заголовок W3C Trace Context <code>traceparent: 00-&lt;trace_id&gt;-&lt;parent_span_id&gt;-&lt;flags&gt;</code>. OTel-інструментування http-клієнта в A автоматично додає заголовок, а інструментування сервера в B читає його і створює свій span із тим самим trace_id і parent = span A. Для черг те саме робиться через заголовки повідомлення.</p></details>
+  <details><summary>7. Чому liveness probe не повинна перевіряти базу даних?</summary><p>Liveness провал = перезапуск контейнера. Якщо БД тимчасово недоступна, всі копії API одночасно провалять liveness і підуть на рестарт — і замість деградації отримаємо повне падіння. Перевірка БД належить readiness: копію тимчасово приберуть з балансувальника, але не вб'ють.</p></details>
+  <details><summary>8. Що таке tail-based sampling і чим він кращий за head-based?</summary><p>Head-based приймає рішення на початку трейсу (наприклад, 5 % випадково) і не знає, чи трейс буде цікавим — тому викидає 95 % помилок. Tail-based чекає завершення трейсу в колекторі і зберігає його за критеріями: усі з помилками, усі повільні, а з нудних — маленький відсоток. Дорожче за пам'яттю колектора, але зберігає все важливе.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>Система в проді має сама розповідати про себе: логи, метрики, трейси — три погляди на одну подію, зв'язані trace id.</li>
+  <li>Логи — структуровані JSON (pino) у stdout, з request id/trace id у кожному рядку, без паролів, токенів і PII.</li>
+  <li>Метрики: counter, gauge, histogram. RED для сервісів, USE для ресурсів. Мітки низької кардинальності, route замість path.</li>
+  <li>Prometheus забирає метрики сам (pull) з <code>/metrics</code>; PromQL: <code>rate()</code> для counter, <code>histogram_quantile()</code> для перцентилів.</li>
+  <li>Середнє бреше — дивіться p95/p99.</li>
+  <li>OpenTelemetry: інструментуєш один раз, бекенд будь-який. Контекст їде через <code>traceparent</code>.</li>
+  <li>SLI — що міряємо, SLO — ціль, SLA — договір. 99,9 % = 43 хв/місяць error budget.</li>
+  <li>Алерти на симптоми з burn rate, кожен з runbook'ом; безжально видаляйте шумні.</li>
+  <li>Liveness простий, readiness перевіряє залежності.</li>
+  <li>Інцидент: спершу mitigate, потім root cause, потім blameless postmortem з action items.</li>
+  <li>Семплюйте трейси (tail-based), стежте за кардинальністю і retention — телеметрія коштує грошей.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://sre.google/sre-book/monitoring-distributed-systems/" target="_blank" rel="noopener">Google SRE Book — Monitoring Distributed Systems</a> — першоджерело «чотирьох золотих сигналів» і філософії алертів на симптоми. Обов'язково.</li>
+    <li><a href="https://sre.google/sre-book/service-level-objectives/" target="_blank" rel="noopener">Google SRE Book — Service Level Objectives</a> — SLI/SLO/SLA і error budget від тих, хто це вигадав.</li>
+    <li><a href="https://sre.google/workbook/alerting-on-slos/" target="_blank" rel="noopener">Site Reliability Workbook — Alerting on SLOs</a> — звідки взялись multi-window burn rate алерти з прикладами правил.</li>
+    <li><a href="https://opentelemetry.io/docs/concepts/" target="_blank" rel="noopener">OpenTelemetry — Concepts</a> — сигнали, спани, контекст, семантичні конвенції; читати перед кодом.</li>
+    <li><a href="https://opentelemetry.io/docs/languages/js/getting-started/nodejs/" target="_blank" rel="noopener">OpenTelemetry JS — Getting started (Node.js)</a> — покроково авто-інструментування, як у розділі 6.3.</li>
+    <li><a href="https://www.w3.org/TR/trace-context/" target="_blank" rel="noopener">W3C Trace Context</a> — специфікація заголовка <code>traceparent</code>; короткий і зрозумілий документ.</li>
+    <li><a href="https://prometheus.io/docs/concepts/metric_types/" target="_blank" rel="noopener">Prometheus — Metric types</a> і <a href="https://prometheus.io/docs/practices/naming/" target="_blank" rel="noopener">Naming best practices</a> — чому <code>_seconds</code>, <code>_total</code> і ніяких ms.</li>
+    <li><a href="https://prometheus.io/docs/prometheus/latest/querying/basics/" target="_blank" rel="noopener">PromQL basics</a> — офіційний вступ до мови запитів.</li>
+    <li><a href="https://grafana.com/docs/grafana/latest/" target="_blank" rel="noopener">Grafana docs</a> — дашборди, Explore, провіжининг datasources як код.</li>
+    <li><a href="https://grafana.com/docs/loki/latest/" target="_blank" rel="noopener">Grafana Loki docs</a> — чому індексуються тільки мітки, LogQL, Promtail.</li>
+    <li><a href="https://getpino.io/#/docs/api" target="_blank" rel="noopener">pino docs</a> — API логера, redact, child loggers, transports.</li>
+    <li><a href="https://github.com/siimon/prom-client" target="_blank" rel="noopener">prom-client (GitHub)</a> — офіційна Node-бібліотека Prometheus з прикладами histogram.</li>
+    <li><a href="https://www.honeycomb.io/blog/observability-a-manifesto" target="_blank" rel="noopener">Charity Majors — Observability: a manifesto (Honeycomb)</a> — ідеологія observability і wide events, звідки виріс сучасний підхід.</li>
+    <li><a href="https://www.brendangregg.com/usemethod.html" target="_blank" rel="noopener">Brendan Gregg — The USE Method</a> — оригінальний опис USE з чек-листами для Linux.</li>
+    <li><a href="https://www.weave.works/blog/the-red-method-key-metrics-for-microservices-architecture/" target="_blank" rel="noopener">Weaveworks — The RED Method</a> — оригінальна стаття Тома Вілкі.</li>
+    <li><a href="https://www.jaegertracing.io/docs/" target="_blank" rel="noopener">Jaeger docs</a> — архітектура трейсинг-бекенду, all-in-one для локальних експериментів.</li>
+    <li><a href="https://response.pagerduty.com/" target="_blank" rel="noopener">PagerDuty Incident Response guide</a> — ролі, комунікація, on-call і postmortem; відкритий і практичний.</li>
+    <li><a href="https://sre.google/sre-book/postmortem-culture/" target="_blank" rel="noopener">Google SRE — Postmortem Culture: Learning from Failure</a> — чому blameless і як це впровадити.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 15</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

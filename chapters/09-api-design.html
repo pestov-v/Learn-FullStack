@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>09. API: REST, GraphQL, gRPC, WebSocket — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 09 · <span class="level-badge level-2">Середній</span></div>
+  <h1>API: REST, GraphQL, gRPC, WebSocket</h1>
+  <p class="lead">Після цього розділу ви зможете спроєктувати REST API, який не соромно показати, зрозумієте, коли GraphQL або gRPC доречніші, чим SSE відрізняється від WebSocket, як безпечно приймати webhooks і чому платежі потребують ідемпотентних ключів.</p>
+  <div class="meta"><span>⏱ ~120 хв</span><span>📚 Передумови: розділи 04, 07</span><span>🎯 Ціль: описати API нотаток в OpenAPI і згенерувати клієнт</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">API як контракт</a></li>
+    <li><a href="#s2">REST глибше: ресурси, методи, ідемпотентність, статуси</a></li>
+    <li><a href="#s3">Пагінація, фільтрація, помилки, версіонування</a></li>
+    <li><a href="#s4">OpenAPI / Swagger: контракт як код</a></li>
+    <li><a href="#s5">GraphQL: схема, resolvers, N+1 і DataLoader</a></li>
+    <li><a href="#s6">gRPC і protobuf; tRPC для TypeScript</a></li>
+    <li><a href="#s7">Реальний час: polling, long polling, SSE, WebSocket</a></li>
+    <li><a href="#s8">Webhooks і їх безпека</a></li>
+    <li><a href="#s9">Порівняння і проєктування: сумісність, deprecation, ідемпотентні ключі</a></li>
+    <li><a href="#s10">Практика: API нотаток в OpenAPI і генерація клієнта</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви ресторан. Ти не заходиш на кухню і не береш каструлі сам — ти дивишся в <b>меню</b> і кажеш офіціанту: «Борщ, номер 12». Меню — це домовленість: що можна замовити, як це називається, що ти отримаєш. <b>API</b> — це меню для програм. <b>REST</b> — класичне меню зі сторінками «Супи», «Салати», де кожна страва має номер. <b>GraphQL</b> — конструктор: «мені борщ, але без сметани, і з нього тільки буряк і м'ясо». <b>gRPC</b> — переговорний пристрій між кухнею і складом, яким люди не користуються, зате він дуже швидкий. <b>WebSocket</b> — коли офіціант не йде, а стоїть біля столика і одразу приносить усе, щойно щось готове. А <b>webhook</b> — це коли ресторан сам дзвонить тобі: «ваше замовлення доставлено».</p>
+</div>
+
+<h2 id="s1">1. API як контракт</h2>
+<p><b>API (Application Programming Interface)</b> — це домовленість між тим, хто надає функціональність (сервер), і тим, хто нею користується (клієнт: браузер, мобільний застосунок, інший сервіс). Хороший API — як хороше меню: зрозумілий без пояснень, передбачуваний (якщо суп №12 — борщ, то й завтра він борщ), повний (є все, що треба) і не надлишковий.</p>
+<p>Ключове слово — <b>контракт</b>. Після того, як API опублікований і ним хтось користується, змінювати його стає важко: кожна зміна — ризик зламати чужий код. Тому проєктування API — це радше про <i>сумісність у часі</i>, ніж про красу URL. Усе, що далі, — способи зробити контракт чітким, а його зміни — безпечними.</p>
+
+<h2 id="s2">2. REST глибше: ресурси, методи, ідемпотентність, статуси</h2>
+<p>У розділі 04 ви побачили REST на прикладі. Тепер — правила, за якими його проєктують.</p>
+<h3>Ресурси та іменування URL</h3>
+<p>REST мислить <b>ресурсами (resources)</b> — іменниками, а не діями. Дія виражається HTTP-методом.</p>
+<div class="table-wrap">
+<table>
+  <tr><th>Погано (дієслова)</th><th>Добре (ресурси)</th><th>Чому</th></tr>
+  <tr><td><code>POST /createNote</code></td><td><code>POST /notes</code></td><td>Дія — у методі, URL — колекція</td></tr>
+  <tr><td><code>GET /getNoteById?id=7</code></td><td><code>GET /notes/7</code></td><td>Ідентифікатор — частина шляху</td></tr>
+  <tr><td><code>POST /notes/7/delete</code></td><td><code>DELETE /notes/7</code></td><td>Є спеціальний метод</td></tr>
+  <tr><td><code>GET /note</code>, <code>GET /Notes</code></td><td><code>GET /notes</code></td><td>Множина, нижній регістр, дефіси: <code>/shopping-lists</code></td></tr>
+  <tr><td><code>GET /users/5/getNotes</code></td><td><code>GET /users/5/notes</code></td><td>Вкладеність показує належність (не глибше 2 рівнів)</td></tr>
+  <tr><td><code>POST /notes/7/publish</code></td><td><code>POST /notes/7/publish</code> або <code>PATCH /notes/7 {status:"published"}</code></td><td>Для справжніх дій, що не вкладаються в CRUD, «дієслівний» під-ресурс припустимий</td></tr>
+</table>
+</div>
+
+<h3>Ідемпотентність методів</h3>
+<p><b>Ідемпотентність (idempotency)</b> — властивість операції, коли повторне виконання дає той самий результат, що й одноразове. Це критично для мереж, де запит може «загубитися» і клієнт не знає, чи він дійшов: ідемпотентний запит можна безпечно повторити.</p>
+<div class="table-wrap">
+<table>
+  <tr><th>Метод</th><th>Безпечний (не змінює стан)</th><th>Ідемпотентний</th><th>Кешується</th><th>Тіло запиту</th><th>Типове використання</th></tr>
+  <tr><td><code>GET</code></td><td>так</td><td>так</td><td>так</td><td>ні</td><td>Прочитати ресурс/колекцію</td></tr>
+  <tr><td><code>HEAD</code></td><td>так</td><td>так</td><td>так</td><td>ні</td><td>Лише заголовки (чи існує, розмір)</td></tr>
+  <tr><td><code>OPTIONS</code></td><td>так</td><td>так</td><td>ні</td><td>ні</td><td>CORS preflight, які методи дозволені</td></tr>
+  <tr><td><code>PUT</code></td><td>ні</td><td>так</td><td>ні</td><td>так</td><td>Повністю замінити ресурс (двічі — той самий стан)</td></tr>
+  <tr><td><code>DELETE</code></td><td>ні</td><td>так</td><td>ні</td><td>зазвичай ні</td><td>Видалити (другий раз — 404 або 204, але стан той самий)</td></tr>
+  <tr><td><code>PATCH</code></td><td>ні</td><td><b>не обов'язково</b></td><td>ні</td><td>так</td><td>Часткова зміна; <code>{likes: +1}</code> — не ідемпотентно, <code>{done: true}</code> — так</td></tr>
+  <tr><td><code>POST</code></td><td>ні</td><td><b>ні</b></td><td>рідко</td><td>так</td><td>Створити; двічі — два ресурси (звідси ідемпотентні ключі, §9)</td></tr>
+</table>
+</div>
+
+<h3>Статуси відповіді, які треба знати напам'ять</h3>
+<ul>
+  <li><b>200 OK</b> — успіх з тілом; <b>201 Created</b> — створено (додайте заголовок <code>Location: /notes/8</code>); <b>202 Accepted</b> — прийнято в обробку (асинхронно); <b>204 No Content</b> — успіх без тіла (DELETE).</li>
+  <li><b>304 Not Modified</b> — кеш клієнта актуальний (з <code>ETag</code>/<code>If-None-Match</code>).</li>
+  <li><b>400 Bad Request</b> — невалідний вхід; <b>401</b> — не автентифікований; <b>403</b> — заборонено; <b>404</b> — нема; <b>405</b> — метод не дозволений; <b>409 Conflict</b> — конфлікт стану (email зайнятий, версія застаріла); <b>422 Unprocessable Content</b> — синтаксис ок, семантика ні (часто для валідації); <b>429 Too Many Requests</b> — rate limit (з <code>Retry-After</code>).</li>
+  <li><b>500</b> — наша помилка; <b>502/503/504</b> — проблеми з апстрімом / перевантаження / таймаут.</li>
+</ul>
+<p>Правило: не повертайте 200 з <code>{"success": false}</code>. Статус — це перше, що бачать клієнти, проксі, моніторинг і кеші.</p>
+
+<h2 id="s3">3. Пагінація, фільтрація, помилки, версіонування</h2>
+<h3>Пагінація: offset проти cursor</h3>
+<p>Колекція на мільйон записів не віддається одним запитом. Два підходи:</p>
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Порівняння offset і cursor пагінації">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="30" class="bold">Offset: ?limit=3&amp;offset=3</text>
+    <rect x="20" y="45" width="60" height="36" rx="8" class="box-fill"/><text x="50" y="68" text-anchor="middle" class="mono small">id 1</text>
+    <rect x="85" y="45" width="60" height="36" rx="8" class="box-fill"/><text x="115" y="68" text-anchor="middle" class="mono small">id 2</text>
+    <rect x="150" y="45" width="60" height="36" rx="8" class="box-fill"/><text x="180" y="68" text-anchor="middle" class="mono small">id 3</text>
+    <rect x="215" y="45" width="60" height="36" rx="8" class="blue"/><text x="245" y="68" text-anchor="middle" class="mono small">id 4</text>
+    <rect x="280" y="45" width="60" height="36" rx="8" class="blue"/><text x="310" y="68" text-anchor="middle" class="mono small">id 5</text>
+    <rect x="345" y="45" width="60" height="36" rx="8" class="blue"/><text x="375" y="68" text-anchor="middle" class="mono small">id 6</text>
+    <text x="115" y="100" text-anchor="middle" class="muted">пропустити 3</text>
+    <text x="310" y="100" text-anchor="middle" class="small">сторінка 2</text>
+    <text x="440" y="60" class="small">SQL: OFFSET 3 LIMIT 3 — БД усе одно читає перші 3</text>
+    <text x="440" y="80" class="small">На offset 1 000 000 — читає мільйон рядків</text>
+    <text x="440" y="100" class="small red">Вставили id 0 між запитами → id 3 з'явиться двічі</text>
+
+    <text x="20" y="160" class="bold">Cursor: ?limit=3&amp;after=eyJpZCI6M30</text>
+    <rect x="20" y="175" width="60" height="36" rx="8" class="box-fill"/><text x="50" y="198" text-anchor="middle" class="mono small">id 1</text>
+    <rect x="85" y="175" width="60" height="36" rx="8" class="box-fill"/><text x="115" y="198" text-anchor="middle" class="mono small">id 2</text>
+    <rect x="150" y="175" width="60" height="36" rx="8" class="accent"/><text x="180" y="198" text-anchor="middle" class="mono small">id 3</text>
+    <rect x="215" y="175" width="60" height="36" rx="8" class="green"/><text x="245" y="198" text-anchor="middle" class="mono small">id 4</text>
+    <rect x="280" y="175" width="60" height="36" rx="8" class="green"/><text x="310" y="198" text-anchor="middle" class="mono small">id 5</text>
+    <rect x="345" y="175" width="60" height="36" rx="8" class="green"/><text x="375" y="198" text-anchor="middle" class="mono small">id 6</text>
+    <path d="M180 215 L180 240" class="arrow"/>
+    <text x="180" y="256" text-anchor="middle" class="muted">курсор = «після id 3»</text>
+    <text x="440" y="190" class="small">SQL: WHERE id &gt; 3 ORDER BY id LIMIT 3 — індекс, O(limit)</text>
+    <text x="440" y="210" class="small">Стабільно при вставках/видаленнях</text>
+    <text x="440" y="230" class="small">Мінус: нема «перейти на сторінку 57»</text>
+    <text x="380" y="300" text-anchor="middle" class="muted">Курсор — непрозорий рядок (base64 від {id, createdAt}); клієнт передає його як є</text>
+  </svg>
+  <figcaption>Offset простий і дає номери сторінок; cursor стабільний і швидкий на великих даних (стрічки, логи).</figcaption>
+</figure>
+<pre><code class="language-json">// Відповідь із cursor-пагінацією — стандартний конверт
+{
+  "data": [ { "id": 4, "title": "…" }, { "id": 5, "title": "…" }, { "id": 6, "title": "…" } ],
+  "pageInfo": { "hasNextPage": true, "endCursor": "eyJpZCI6Nn0" }
+}</code></pre>
+
+<h3>Фільтрація, сортування, вибір полів</h3>
+<pre><code>GET /notes?status=done&amp;tag=work            # фільтр за полями
+GET /notes?createdAt[gte]=2025-01-01         # діапазони — у дужках або окремими параметрами
+GET /notes?sort=-createdAt,title             # «-» — за спаданням; кілька ключів через кому
+GET /notes?fields=id,title                   # sparse fieldsets — лише потрібні поля
+GET /notes?q=borsch                          # повнотекстовий пошук</code></pre>
+<p>Документуйте, які поля можна фільтрувати і сортувати, і відхиляйте невідомі — інакше хтось відсортує за неіндексованим полем і покладе базу.</p>
+
+<h3>Помилки в єдиному форматі: RFC 9457</h3>
+<p>Кожен endpoint повертає помилки по-різному — біль для клієнта. Стандарт <b>RFC 9457 «Problem Details for HTTP APIs»</b> (оновлений RFC 7807) задає формат із <code>Content-Type: application/problem+json</code>:</p>
+<pre><code class="language-json">HTTP/1.1 422 Unprocessable Content
+Content-Type: application/problem+json
+
+{
+  "type": "https://api.example.com/problems/validation-error",   // URI, що ідентифікує тип помилки
+  "title": "Validation failed",                                    // коротко, однаково для типу
+  "status": 422,
+  "detail": "Поле 'title' має бути від 1 до 200 символів",        // людське пояснення конкретного випадку
+  "instance": "/notes",                                            // де сталося
+  "errors": [ { "field": "title", "code": "too_long", "max": 200 } ] // розширення — свої поля дозволені
+}</code></pre>
+<pre><code class="language-js">// Express: один обробник помилок замість сотні res.status(...).json(...)
+class HttpProblem extends Error {
+  constructor(status, title, detail, extra = {}) { super(detail); Object.assign(this, { status, title, extra }); }
+}
+app.use((err, req, res, _next) => {
+  const status = err.status ?? 500;
+  if (status >= 500) console.error(err);                  // 5xx логуємо, 4xx — ні
+  res.status(status).type("application/problem+json").json({
+    type: `https://api.example.com/problems/${err.type ?? "internal"}`,
+    title: err.title ?? "Internal Server Error",
+    status,
+    detail: status >= 500 ? "Щось пішло не так" : err.message, // не витікаємо stack trace
+    instance: req.originalUrl,
+    ...err.extra,
+  });
+});</code></pre>
+
+<h3>Версіонування</h3>
+<ul>
+  <li><b>В URL</b>: <code>/v1/notes</code>. Видно, просто, кешується, найпоширеніше (Stripe, GitHub у минулому, Twitter).</li>
+  <li><b>У заголовку</b>: <code>Accept: application/vnd.example.v2+json</code> або власний <code>X-API-Version: 2024-06-01</code>. «Чистіші» URL, але невидимо в браузері і складніше тестувати. Stripe використовує дати як версії у заголовку, а мажорна — в URL.</li>
+  <li><b>Найкраща версія — та, якої не було</b>: додавайте поля, не видаляйте; нові обов'язкові параметри — з дефолтами. Нова мажорна версія — лише коли зламати сумісність неминуче.</li>
+</ul>
+
+<h3>HATEOAS коротко</h3>
+<p>Ідея з «канонічного» REST: відповідь містить посилання на можливі дії (<code>"links": {"publish": "/notes/7/publish"}</code>), як сторінка містить гіперпосилання. На практиці мало хто реалізує повністю, але <code>Location</code> після 201 і <code>next</code> у пагінації — це саме воно.</p>
+
+<h2 id="s4">4. OpenAPI / Swagger: контракт як код</h2>
+<p><b>OpenAPI</b> — стандарт опису REST API у YAML/JSON (раніше називався Swagger; Swagger тепер — набір інструментів навколо OpenAPI). З одного файлу отримуємо: інтерактивну документацію (Swagger UI, Redoc), клієнти для будь-якої мови, валідацію запитів, моки, тести на відповідність.</p>
+<pre><code class="language-yaml"># openapi.yaml — фрагмент для API нотаток
+openapi: 3.1.0
+info:
+  title: Notes API
+  version: 1.0.0
+  description: Прості нотатки з розділу 04
+servers:
+  - url: http://localhost:3000/api
+paths:
+  /notes:
+    get:
+      operationId: listNotes            # з цього імені генератор зробить client.listNotes()
+      summary: Список нотаток
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, done] }
+        - name: after
+          in: query
+          description: Курсор з попередньої відповіді
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Сторінка нотаток
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pageInfo]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Note" } }
+                  pageInfo: { $ref: "#/components/schemas/PageInfo" }
+    post:
+      operationId: createNote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewNote" }
+      responses:
+        "201":
+          description: Створено
+          headers:
+            Location: { schema: { type: string }, description: URL нової нотатки }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+        "422":
+          $ref: "#/components/responses/Problem"
+  /notes/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      operationId: getNote
+      responses:
+        "200": { description: Нотатка, content: { application/json: { schema: { $ref: "#/components/schemas/Note" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: updateNote
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { title: { type: string }, done: { type: boolean } }
+      responses:
+        "200": { description: Оновлено, content: { application/json: { schema: { $ref: "#/components/schemas/Note" } } } }
+    delete:
+      operationId: deleteNote
+      responses:
+        "204": { description: Видалено }
+components:
+  schemas:
+    Note:
+      type: object
+      required: [id, title, done, createdAt]
+      properties:
+        id: { type: integer, examples: [7] }
+        title: { type: string, maxLength: 200 }
+        done: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    NewNote:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+    PageInfo:
+      type: object
+      properties:
+        hasNextPage: { type: boolean }
+        endCursor: { type: [string, "null"] }
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+  responses:
+    Problem:
+      description: Помилка у форматі RFC 9457
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }</code></pre>
+<pre><code class="language-bash"># Документація одним рядком (Swagger UI у Docker):
+docker run -p 8080:8080 -e SWAGGER_JSON=/spec/openapi.yaml -v $(pwd):/spec swaggerapi/swagger-ui
+# або Redoc: npx @redocly/cli preview-docs openapi.yaml
+
+# Перевірити спеку на помилки:
+npx @redocly/cli lint openapi.yaml
+
+# Згенерувати TypeScript-типи і клієнт:
+npx openapi-typescript openapi.yaml -o src/api-types.d.ts
+npm i openapi-fetch</code></pre>
+<p>Два підходи: <b>design-first</b> (спочатку YAML, потім код — спека як предмет обговорення з фронтендом) і <b>code-first</b> (декоратори/схеми Zod у коді генерують спеку — NestJS, Fastify, Hono роблять це з коробки). Обидва працюють; головне, щоб спека і код ніколи не розходилися — для цього є тести на відповідність (contract tests).</p>
+
+<div class="box why">
+  <div class="title">Чому OpenAPI варте зусиль</div>
+  <p>Без спеки фронтенд і бекенд домовляються «на словах» і кожен неправильно запам'ятовує. Зі спекою: фронтенд починає роботу з моків до готовності бекенду; типи генеруються, а не дублюються вручну; зміна поля у спеці підсвічує всі місця, що зламаються; новий розробник читає Swagger UI замість того, щоб смикати колег. Це та сама ідея, що й TypeScript, але на рівні мережі.</p>
+</div>
+
+<h2 id="s5">5. GraphQL: схема, resolvers, N+1 і DataLoader</h2>
+<p><b>GraphQL</b> — мова запитів і рантайм від Facebook (2015). Замість багатьох endpoint'ів — один (<code>POST /graphql</code>), а клієнт описує, <i>яку саме форму даних</i> хоче. Сервер публікує <b>схему (schema)</b> — строго типізований опис усього, що можна запитати.</p>
+<pre><code class="language-graphql"># schema.graphql
+type Note {
+  id: ID!
+  title: String!
+  done: Boolean!
+  author: User!          # зв'язок — і клієнт сам вирішує, чи тягнути його
+  tags: [Tag!]!
+}
+type User { id: ID!, name: String!, notes: [Note!]! }
+type Tag { id: ID!, name: String! }
+
+type Query {
+  notes(status: NoteStatus, first: Int = 20, after: String): NoteConnection!
+  note(id: ID!): Note
+}
+type Mutation {
+  createNote(input: NewNoteInput!): Note!
+  toggleNote(id: ID!): Note!
+}
+type Subscription {
+  noteAdded: Note!        # push через WebSocket
+}
+enum NoteStatus { ACTIVE, DONE }
+input NewNoteInput { title: String! }
+type NoteConnection { edges: [NoteEdge!]!, pageInfo: PageInfo! }
+type NoteEdge { node: Note!, cursor: String! }
+type PageInfo { hasNextPage: Boolean!, endCursor: String }</code></pre>
+<pre><code class="language-graphql"># Запит клієнта: рівно ті поля, які треба для екрана — не більше, не менше
+query NotesScreen {
+  notes(status: ACTIVE, first: 10) {
+    edges {
+      node {
+        id
+        title
+        author { name }        # вкладені дані одним запитом — без другого round-trip
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+
+# Мутація
+mutation { createNote(input: { title: "Купити хліб" }) { id title } }</code></pre>
+<p><b>Resolver</b> — функція, яка знає, як дістати одне поле. GraphQL-сервер обходить запит як дерево і викликає resolver для кожного поля. І тут ховається головна проблема:</p>
+
+<figure>
+  <svg viewBox="0 0 760 340" role="img" aria-label="Проблема N+1 у GraphQL і рішення через DataLoader">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="28" class="bold">Без DataLoader (N+1):</text>
+    <rect x="20" y="40" width="150" height="44" rx="10" class="blue"/><text x="95" y="67" text-anchor="middle" class="mono small">notes resolver</text>
+    <path d="M170 62 L230 62" class="arrow"/>
+    <rect x="230" y="40" width="200" height="44" rx="10" class="green"/><text x="330" y="67" text-anchor="middle" class="mono small">SELECT * FROM notes (1)</text>
+    <path d="M95 84 L95 120" class="arrow"/>
+    <rect x="20" y="120" width="150" height="44" rx="10" class="blue"/><text x="95" y="147" text-anchor="middle" class="mono small">author resolver ×10</text>
+    <path d="M170 142 L230 142" class="arrow"/>
+    <rect x="230" y="105" width="200" height="30" rx="8" class="red"/><text x="330" y="125" text-anchor="middle" class="mono small">SELECT … WHERE id=1</text>
+    <rect x="230" y="140" width="200" height="30" rx="8" class="red"/><text x="330" y="160" text-anchor="middle" class="mono small">SELECT … WHERE id=2</text>
+    <text x="330" y="188" text-anchor="middle" class="mono small">… ще 8 запитів</text>
+    <text x="470" y="130" class="small">10 нотаток = 11 запитів</text>
+    <text x="470" y="150" class="small">1000 нотаток = 1001 запит</text>
+
+    <text x="20" y="235" class="bold">З DataLoader (батчинг + кеш на запит):</text>
+    <rect x="20" y="250" width="150" height="44" rx="10" class="blue"/><text x="95" y="277" text-anchor="middle" class="mono small">author resolver ×10</text>
+    <path d="M170 272 L230 272" class="arrow"/>
+    <rect x="230" y="250" width="180" height="44" rx="10" class="purple"/>
+    <text x="320" y="268" text-anchor="middle" class="mono small">loader.load(id)</text>
+    <text x="320" y="285" text-anchor="middle" class="small">збирає id за один tick</text>
+    <path d="M410 272 L470 272" class="arrow"/>
+    <rect x="470" y="250" width="270" height="44" rx="10" class="green"/>
+    <text x="605" y="268" text-anchor="middle" class="mono small">SELECT … WHERE id IN (1,2,…,10)</text>
+    <text x="605" y="285" text-anchor="middle" class="small">один запит замість десяти</text>
+    <text x="380" y="325" text-anchor="middle" class="muted">DataLoader відкладає виклики до кінця поточного event-loop tick і виконує один батч</text>
+  </svg>
+  <figcaption>Кожен resolver не знає про сусідів. DataLoader збирає їхні запити у пакет — і повертає кожному його частину.</figcaption>
+</figure>
+
+<pre><code class="language-js">// resolvers.js — з graphql-yoga або Apollo Server
+import DataLoader from "dataloader";
+
+// Створюємо loader НА КОЖЕН ЗАПИТ (у context), щоб кеш не тік між користувачами
+export function createLoaders(db) {
+  return {
+    userById: new DataLoader(async (ids) => {
+      const rows = await db.select().from(users).where(inArray(users.id, ids));
+      const byId = new Map(rows.map(u => [u.id, u]));
+      return ids.map(id => byId.get(id) ?? null);   // порядок і довжина мають збігатися з ids!
+    }),
+  };
+}
+
+export const resolvers = {
+  Query: {
+    notes: (_, { status, first, after }, { db }) => paginateNotes(db, { status, first, after }),
+  },
+  Note: {
+    author: (note, _, { loaders }) => loaders.userById.load(note.authorId), // батчиться
+  },
+  Mutation: {
+    createNote: async (_, { input }, { db, user, pubsub }) => {
+      if (!user) throw new GraphQLError("Unauthenticated", { extensions: { code: "UNAUTHENTICATED" } });
+      const [note] = await db.insert(notes).values({ title: input.title, authorId: user.id }).returning();
+      pubsub.publish("NOTE_ADDED", { noteAdded: note });
+      return note;
+    },
+  },
+  Subscription: {
+    noteAdded: { subscribe: (_, __, { pubsub }) => pubsub.subscribe("NOTE_ADDED") },
+  },
+};</code></pre>
+<p><b>Коли GraphQL доречний:</b> багато різних клієнтів із різними потребами в даних (веб, мобільний, партнери); глибоко зв'язані дані (соцграф); фронтенд-команди хочуть самостійності від бекенду. <b>Коли ні:</b> простий CRUD з одним клієнтом (REST простіший); потрібне HTTP-кешування (GraphQL — усе через POST); файли (незручно); команда без досвіду — складність схем, авторизації на рівні полів, обмеження глибини запитів і вартості (query complexity), N+1 — усе це треба вирішувати, тоді як у REST воно вирішується «саме собою».</p>
+
+<h2 id="s6">6. gRPC і protobuf; tRPC для TypeScript</h2>
+<p><b>gRPC</b> — фреймворк віддалених викликів від Google. Ви описуєте сервіс у файлі <code>.proto</code> (<b>Protocol Buffers</b>), генератор створює клієнт і сервер для десятка мов, а дані передаються у компактному бінарному форматі поверх <b>HTTP/2</b> (мультиплексування, стріми в обидва боки).</p>
+<pre><code class="language-protobuf">// notes.proto
+syntax = "proto3";
+package notes.v1;
+
+service NotesService {
+  rpc GetNote (GetNoteRequest) returns (Note);                   // унарний виклик
+  rpc ListNotes (ListNotesRequest) returns (stream Note);        // серверний стрім: нотатки по одній
+  rpc WatchNotes (stream WatchRequest) returns (stream NoteEvent); // двонаправлений стрім
+}
+
+message Note {
+  int64  id         = 1;   // номери полів — це і є контракт; імена можна міняти, номери — ні
+  string title      = 2;
+  bool   done       = 3;
+  int64  author_id  = 4;
+  reserved 5;              // видалене поле: номер не перевикористовувати
+}
+message GetNoteRequest  { int64 id = 1; }
+message ListNotesRequest { optional bool done = 1; int32 page_size = 2; }
+message WatchRequest { repeated int64 ids = 1; }
+message NoteEvent { Note note = 1; string type = 2; }</code></pre>
+<pre><code class="language-js">// server.js — @grpc/grpc-js + @grpc/proto-loader (Node)
+import grpc from "@grpc/grpc-js";
+import protoLoader from "@grpc/proto-loader";
+
+const pkg = grpc.loadPackageDefinition(protoLoader.loadSync("notes.proto")).notes.v1;
+const server = new grpc.Server();
+server.addService(pkg.NotesService.service, {
+  GetNote: (call, cb) => cb(null, { id: call.request.id, title: "Привіт", done: false, author_id: 1 }),
+  ListNotes: (call) => { for (const n of allNotes) call.write(n); call.end(); }, // стрім
+});
+server.bindAsync("0.0.0.0:50051", grpc.ServerCredentials.createInsecure(), () => console.log("gRPC :50051"));</code></pre>
+<p><b>Де використовують:</b> між мікросервісами всередині інфраструктури (Kubernetes, Envoy, etcd — усі говорять gRPC), де важливі швидкість, строгі типи між мовами (Go ↔ Java ↔ Node) і стрімінг. <b>Де ні:</b> з браузера напряму (потрібен gRPC-Web проксі), для публічних API (людям звичніший JSON), для простих проєктів.</p>
+
+<h3>tRPC: типи без схеми для TS-монорепо</h3>
+<p>Якщо і клієнт, і сервер — TypeScript в одному репозиторії, <b>tRPC</b> дає end-to-end типізацію <i>без</i> генерації коду: клієнт імпортує тип роутера, і автодоповнення знає всі процедури та їхні аргументи. Змінили тип на сервері — фронтенд не компілюється. Немає ні YAML, ні .proto, ні кодогенерації.</p>
+<pre><code class="language-ts">// server/router.ts
+import { initTRPC } from "@trpc/server";
+import { z } from "zod";
+const t = initTRPC.create();
+export const appRouter = t.router({
+  notes: t.router({
+    list: t.procedure.input(z.object({ done: z.boolean().optional() })).query(({ input }) => db.listNotes(input)),
+    create: t.procedure.input(z.object({ title: z.string().min(1).max(200) })).mutation(({ input }) => db.createNote(input)),
+  }),
+});
+export type AppRouter = typeof appRouter;   // лише ТИП експортується на клієнт
+
+// client.ts
+import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import type { AppRouter } from "../server/router";
+const trpc = createTRPCClient&lt;AppRouter&gt;({ links: [httpBatchLink({ url: "/trpc" })] });
+const notes = await trpc.notes.list.query({ done: false });  // повністю типізовано, без генерації</code></pre>
+<p>Ціна: працює тільки для TypeScript-клієнтів, яких ви контролюєте. Для публічного API або мобільного застосунку на Swift усе одно потрібен REST/OpenAPI.</p>
+
+<h2 id="s7">7. Реальний час: polling, long polling, SSE, WebSocket</h2>
+<p>HTTP — «клієнт питає, сервер відповідає». А якщо сервер хоче повідомити щось <i>сам</i> — нове повідомлення в чаті, зміна ціни, прогрес задачі? Чотири підходи, від найпростішого до найпотужнішого:</p>
+
+<figure>
+  <svg viewBox="0 0 760 420" role="img" aria-label="Таймлайни polling, long polling, SSE, WebSocket">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="130" y="22" class="muted">клієнт ↕ сервер · час →</text>
+    <text x="20" y="70" class="bold">Polling</text>
+    <path d="M130 45 L740 45" class="arrow dashed" style="marker-end:none"/>
+    <path d="M130 95 L740 95" class="arrow dashed" style="marker-end:none"/>
+    <path d="M150 45 L160 95" class="arrow"/><path d="M165 95 L175 45" class="arrow"/>
+    <path d="M230 45 L240 95" class="arrow"/><path d="M245 95 L255 45" class="arrow"/>
+    <path d="M310 45 L320 95" class="arrow"/><path d="M325 95 L335 45" class="arrow"/>
+    <path d="M390 45 L400 95" class="arrow"/><path d="M405 95 L415 45" class="arrow"/>
+    <text x="160" y="110" class="muted small">«є нове?» «ні»</text>
+    <text x="320" y="110" class="muted small">«ні»</text>
+    <text x="400" y="110" class="muted small">«так!»</text>
+    <text x="470" y="75" class="small">просто; марні запити; затримка = інтервал</text>
+
+    <text x="20" y="170" class="bold">Long polling</text>
+    <path d="M130 145 L740 145" class="arrow dashed" style="marker-end:none"/>
+    <path d="M130 195 L740 195" class="arrow dashed" style="marker-end:none"/>
+    <path d="M150 145 L160 195" class="arrow"/>
+    <path d="M160 195 L330 195" class="arrow" style="marker-end:none"/>
+    <path d="M330 195 L340 145" class="arrow"/>
+    <path d="M350 145 L360 195" class="arrow"/>
+    <text x="245" y="212" text-anchor="middle" class="muted small">сервер тримає запит, поки нема подій</text>
+    <text x="470" y="175" class="small">майже миттєво; один запит на подію; таймаути проксі</text>
+
+    <text x="20" y="270" class="bold">SSE</text>
+    <path d="M130 245 L740 245" class="arrow dashed" style="marker-end:none"/>
+    <path d="M130 295 L740 295" class="arrow dashed" style="marker-end:none"/>
+    <path d="M150 245 L160 295" class="arrow"/>
+    <path d="M160 295 L740 295" class="arrow" style="marker-end:none;stroke-width:3"/>
+    <path d="M230 295 L235 250" class="arrow"/><path d="M330 295 L335 250" class="arrow"/><path d="M380 295 L385 250" class="arrow"/><path d="M560 295 L565 250" class="arrow"/>
+    <text x="245" y="312" text-anchor="middle" class="muted small">одне HTTP-з'єднання, події лише сервер → клієнт</text>
+    <text x="470" y="270" class="small">text/event-stream; авто-reconnect; вбудовано в браузер</text>
+
+    <text x="20" y="370" class="bold">WebSocket</text>
+    <path d="M130 345 L740 345" class="arrow dashed" style="marker-end:none"/>
+    <path d="M130 395 L740 395" class="arrow dashed" style="marker-end:none"/>
+    <path d="M150 345 L160 395" class="arrow"/>
+    <text x="175" y="365" class="mono small">Upgrade: websocket</text>
+    <path d="M160 395 L740 395" class="arrow" style="marker-end:none;stroke-width:3"/>
+    <path d="M330 395 L335 350" class="arrow"/><path d="M360 350 L365 395" class="arrow"/><path d="M420 395 L425 350" class="arrow"/><path d="M500 350 L505 395" class="arrow"/><path d="M560 395 L565 350" class="arrow"/>
+    <text x="245" y="412" text-anchor="middle" class="muted small">двонаправлений, бінарний, постійний</text>
+    <text x="580" y="370" class="small">чат, ігри, спільне редагування</text>
+  </svg>
+  <figcaption>Чим нижче, тим менше зайвого трафіку і затримки — але тим складніше масштабувати (з'єднання треба тримати).</figcaption>
+</figure>
+
+<h3>SSE (Server-Sent Events) — недооцінений</h3>
+<p>Якщо дані течуть лише від сервера до клієнта (сповіщення, стрічка, прогрес, стрімінг відповіді LLM), SSE — найкращий вибір: це звичайний HTTP, працює через будь-які проксі, браузер сам перепідключається і надсилає <code>Last-Event-ID</code>.</p>
+<pre><code class="language-js">// server: Express
+app.get("/events", (req, res) => {
+  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  res.flushHeaders();
+  const send = (event, data, id) => res.write(`id: ${id}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  const unsubscribe = bus.subscribe("note", (note) => send("note", note, note.id));
+  const ping = setInterval(() => res.write(": ping\n\n"), 25_000); // щоб проксі не закрив з'єднання
+  req.on("close", () => { clearInterval(ping); unsubscribe(); });
+});
+
+// browser
+const es = new EventSource("/events");
+es.addEventListener("note", (e) => console.log("нова нотатка", JSON.parse(e.data)));</code></pre>
+
+<h3>WebSocket: чат на бібліотеці ws</h3>
+<pre><code class="language-js">// chat-server.js — npm i ws
+import { WebSocketServer } from "ws";
+import http from "node:http";
+
+const server = http.createServer();                       // можна ділити порт з Express
+const wss = new WebSocketServer({ server, path: "/chat" });
+const rooms = new Map();                                  // room → Set&lt;ws&gt;
+
+wss.on("connection", (ws, req) => {
+  // автентифікація: cookie сесії з req.headers.cookie або token у query — перевіряємо ТУТ, при handshake
+  const user = authenticate(req);
+  if (!user) return ws.close(4401, "unauthorized");
+  ws.isAlive = true;
+  ws.on("pong", () => { ws.isAlive = true; });
+
+  ws.on("message", (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return ws.send(JSON.stringify({ type: "error", detail: "bad json" })); }
+    if (msg.type === "join") {
+      ws.room = msg.room;
+      (rooms.get(msg.room) ?? rooms.set(msg.room, new Set()).get(msg.room)).add(ws);
+    } else if (msg.type === "chat" &amp;&amp; ws.room &amp;&amp; typeof msg.text === "string" &amp;&amp; msg.text.length &lt;= 1000) {
+      const out = JSON.stringify({ type: "chat", from: user.name, text: msg.text, at: Date.now() });
+      for (const peer of rooms.get(ws.room)) if (peer.readyState === peer.OPEN) peer.send(out);
+    }
+  });
+  ws.on("close", () => rooms.get(ws.room)?.delete(ws));
+});
+
+// heartbeat: мертві з'єднання (мобільний пішов у тунель) не закриваються самі
+setInterval(() => {
+  for (const ws of wss.clients) { if (!ws.isAlive) return ws.terminate(); ws.isAlive = false; ws.ping(); }
+}, 30_000);
+
+server.listen(3000);
+
+// browser
+const ws = new WebSocket("wss://example.com/chat");
+ws.onopen = () => ws.send(JSON.stringify({ type: "join", room: "general" }));
+ws.onmessage = (e) => render(JSON.parse(e.data));
+ws.onclose = () => setTimeout(reconnect, 1000);           // reconnect — ваша відповідальність (на відміну від SSE)</code></pre>
+<p>Для продакшену з кількома серверами: з'єднання з одного сервера не бачать клієнтів іншого — потрібен брокер (Redis Pub/Sub) між інстансами. Бібліотека Socket.IO додає кімнати, reconnect, fallback і адаптери для цього з коробки.</p>
+
+<div class="box warn">
+  <div name="ws-warn" class="title">Підводні камені реального часу</div>
+  <ul>
+    <li>Автентифікуйте при handshake і перевіряйте права на кожне повідомлення — WebSocket не має «middleware на маршрут».</li>
+    <li>Валідуйте розмір і формат кожного повідомлення; обмежуйте частоту (rate limit на з'єднання).</li>
+    <li>Cross-Site WebSocket Hijacking: перевіряйте заголовок <code>Origin</code> при handshake — cookie до WS надсилаються, а CORS не діє.</li>
+    <li>Балансувальники і проксі мають таймаути на «тихі» з'єднання — робіть ping/heartbeat.</li>
+    <li>Serverless-платформи (Lambda, Vercel Functions) погано тримають довгі з'єднання — беріть керований сервіс (Pusher, Ably) або окремий сервер.</li>
+  </ul>
+</div>
+
+<h2 id="s8">8. Webhooks і їх безпека</h2>
+<p><b>Webhook</b> — «зворотний API»: не ви питаєте Stripe «чи пройшов платіж?», а Stripe робить <code>POST</code> на ваш URL, коли подія сталася. Так працюють платежі, GitHub-події, повідомлення в месенджерах.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Потік webhook від Stripe до вашого сервера з підписом і ретраями">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="30" width="170" height="70" rx="14" class="blue"/>
+    <text x="95" y="58" text-anchor="middle" class="bold">Користувач</text>
+    <text x="95" y="80" text-anchor="middle" class="small">оплатив на Stripe</text>
+    <path d="M180 65 L280 65" class="arrow"/>
+    <rect x="280" y="30" width="180" height="70" rx="14" class="purple"/>
+    <text x="370" y="58" text-anchor="middle" class="bold">Stripe</text>
+    <text x="370" y="80" text-anchor="middle" class="small">подія payment.succeeded</text>
+    <path d="M460 65 L570 65" class="arrow"/>
+    <text x="515" y="50" text-anchor="middle" class="mono small">POST /webhooks/stripe</text>
+    <text x="515" y="85" text-anchor="middle" class="mono small">Stripe-Signature: t=…,v1=hmac</text>
+    <rect x="570" y="30" width="180" height="70" rx="14" class="green"/>
+    <text x="660" y="58" text-anchor="middle" class="bold">Ваш сервер</text>
+    <text x="660" y="80" text-anchor="middle" class="small">публічний endpoint</text>
+
+    <rect x="570" y="130" width="180" height="150" rx="14" class="box-fill"/>
+    <text x="660" y="152" text-anchor="middle" class="bold small">Обробка</text>
+    <text x="660" y="175" text-anchor="middle" class="small">1. Перевірити HMAC-підпис</text>
+    <text x="660" y="195" text-anchor="middle" class="small">2. Перевірити timestamp (±5 хв)</text>
+    <text x="660" y="215" text-anchor="middle" class="small">3. event.id уже бачили? → 200</text>
+    <text x="660" y="235" text-anchor="middle" class="small">4. Записати в чергу</text>
+    <text x="660" y="255" text-anchor="middle" class="small">5. Відповісти 200 швидко</text>
+    <path d="M660 100 L660 130" class="arrow"/>
+
+    <path d="M570 240 L460 240" class="arrow"/>
+    <text x="515" y="230" text-anchor="middle" class="mono small">200 OK (&lt; 5 c)</text>
+    <rect x="280" y="205" width="180" height="70" rx="14" class="accent"/>
+    <text x="370" y="230" text-anchor="middle" class="bold small">Не 2xx або таймаут?</text>
+    <text x="370" y="250" text-anchor="middle" class="small">повтор через 1 хв, 5 хв, 30 хв…</text>
+    <text x="370" y="268" text-anchor="middle" class="muted">до 3 днів — тому ідемпотентність</text>
+  </svg>
+  <figcaption>Провайдер повторює доставку, поки не отримає 2xx. Ваш обробник має бути швидким, ідемпотентним і перевіряти підпис.</figcaption>
+</figure>
+
+<pre><code class="language-js">// Прийом webhook від Stripe: ВАЖЛИВО — сирий body, а не розпарсений JSON
+import express from "express";
+import Stripe from "stripe";
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+app.post("/webhooks/stripe", express.raw({ type: "application/json" }), async (req, res) => {
+  let event;
+  try {
+    // перевіряє HMAC-SHA256 підпис із секретом endpoint'а і timestamp (захист від replay)
+    event = stripe.webhooks.constructEvent(req.body, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    return res.status(400).send(`Webhook signature failed: ${err.message}`);
+  }
+
+  // Ідемпотентність: той самий event.id може прийти двічі
+  const seen = await db.insert(webhookEvents).values({ id: event.id }).onConflictDoNothing().returning();
+  if (seen.length === 0) return res.status(200).end();          // уже обробляли
+
+  await queue.add("stripe-event", event);                        // важку роботу — у чергу, не тут
+  res.status(200).end();                                         // відповісти швидко
+});
+
+// Власний webhook (ви — провайдер): підписуйте так само
+import crypto from "node:crypto";
+function sign(body, secret) {
+  const t = Math.floor(Date.now() / 1000);
+  const sig = crypto.createHmac("sha256", secret).update(`${t}.${body}`).digest("hex");
+  return `t=${t},v1=${sig}`;
+}</code></pre>
+
+<div class="box why">
+  <div class="title">Чому підпис, а не «секретний URL»</div>
+  <p>URL потрапляє в логи проксі, історію браузера, репозиторії. HMAC-підпис із секретом, який ніколи не передається мережею, доводить, що тіло надіслав саме провайдер і що воно не змінене. Timestamp у підписі не дає зловмиснику «переграти» перехоплений запит через годину. Без цього будь-хто, хто дізнався URL, може надіслати вам <code>payment.succeeded</code> і отримати товар безкоштовно.</p>
+</div>
+
+<h2 id="s9">9. Порівняння і проєктування: сумісність, deprecation, ідемпотентні ключі</h2>
+<div class="table-wrap">
+<table>
+  <tr><th></th><th>REST</th><th>GraphQL</th><th>gRPC</th><th>WebSocket</th></tr>
+  <tr><td>Транспорт</td><td>HTTP/1.1, HTTP/2</td><td>HTTP (POST), WS для subscriptions</td><td>HTTP/2</td><td>TCP після Upgrade</td></tr>
+  <tr><td>Формат</td><td>JSON (текст)</td><td>JSON</td><td>Protobuf (бінарний)</td><td>будь-який: текст/бінарний</td></tr>
+  <tr><td>Контракт</td><td>OpenAPI (опційно)</td><td>Схема (обов'язково), інтроспекція</td><td>.proto (обов'язково)</td><td>нема стандарту; свій протокол</td></tr>
+  <tr><td>Форма даних</td><td>Фіксована сервером</td><td>Задає клієнт</td><td>Фіксована</td><td>довільна</td></tr>
+  <tr><td>Кешування HTTP</td><td>Відмінно (GET, ETag, CDN)</td><td>Складно (POST)</td><td>Ні</td><td>Ні</td></tr>
+  <tr><td>Стрімінг</td><td>SSE / chunked</td><td>Subscriptions</td><td>Так, обидва боки</td><td>Так, обидва боки</td></tr>
+  <tr><td>З браузера</td><td>Так</td><td>Так</td><td>Через gRPC-Web проксі</td><td>Так</td></tr>
+  <tr><td>Кодогенерація</td><td>З OpenAPI</td><td>З схеми (codegen)</td><td>Вбудована, всі мови</td><td>—</td></tr>
+  <tr><td>Крива входу</td><td>Низька</td><td>Середня</td><td>Середня</td><td>Низька для «hello», висока для продакшену</td></tr>
+  <tr><td>Типовий вибір</td><td>Публічні API, CRUD, сайти</td><td>Багато клієнтів, складні графи даних</td><td>Мікросервіси, висока продуктивність</td><td>Чат, ігри, колаборація</td></tr>
+</table>
+</div>
+
+<h3>Backward compatibility і deprecation</h3>
+<p>Безпечні зміни (не ламають клієнтів): додати поле у відповідь; додати необов'язковий параметр; додати новий endpoint; додати значення в enum (обережно — старі клієнти можуть падати на невідомому). Небезпечні: перейменувати/видалити поле; змінити тип; зробити параметр обов'язковим; змінити семантику статусу; змінити формат дати. Правило Постела: «будь консервативним у тому, що надсилаєш, і ліберальним у тому, що приймаєш» — клієнти мають ігнорувати невідомі поля.</p>
+<p>Коли ламати все ж треба — <b>deprecation</b> як процес: оголосити (заголовки <code>Deprecation: true</code>, <code>Sunset: Sat, 01 Mar 2026 00:00:00 GMT</code>, <code>Link: &lt;…/migration&gt;; rel="deprecation"</code>), логувати, хто ще користується старим, попередити їх, дати 6–12 місяців, потім вимкнути. Stripe тримає старі версії роками — саме тому їм довіряють.</p>
+
+<h3>Rate limits</h3>
+<p>Повідомляйте ліміти в заголовках, щоб клієнти могли адаптуватися: <code>RateLimit-Limit: 100</code>, <code>RateLimit-Remaining: 37</code>, <code>RateLimit-Reset: 42</code> (стандарт IETF draft), при перевищенні — <code>429</code> + <code>Retry-After</code>. Клієнти мають робити backoff з jitter, а не бити в стіну.</p>
+
+<h3>Ідемпотентні ключі для платежів</h3>
+<p><code>POST /payments</code> не ідемпотентний: мережа обірвалась після того, як сервер списав гроші, але до того, як клієнт отримав відповідь. Клієнт повторює — і списує вдруге. Рішення, стандартизоване Stripe: клієнт генерує унікальний <b>Idempotency-Key</b> для операції і надсилає його з кожним повтором.</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Ідемпотентний ключ при повторі платіжного запиту">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="140" height="44" rx="12" class="blue"/><text x="90" y="48" text-anchor="middle" class="bold">Клієнт</text>
+    <rect x="310" y="20" width="140" height="44" rx="12" class="green"/><text x="380" y="48" text-anchor="middle" class="bold">API</text>
+    <rect x="600" y="20" width="140" height="44" rx="12" class="purple"/><text x="670" y="48" text-anchor="middle" class="bold">Сховище ключів</text>
+    <path d="M90 64 L90 320" class="arrow dashed" style="marker-end:none"/>
+    <path d="M380 64 L380 320" class="arrow dashed" style="marker-end:none"/>
+    <path d="M670 64 L670 320" class="arrow dashed" style="marker-end:none"/>
+
+    <path d="M90 95 L378 95" class="arrow"/>
+    <text x="234" y="87" text-anchor="middle" class="mono">POST /payments  Idempotency-Key: k1</text>
+    <path d="M380 120 L668 120" class="arrow"/>
+    <text x="524" y="112" text-anchor="middle" class="mono small">k1 є? → ні → LOCK k1</text>
+    <text x="395" y="150" class="small">списати 100 грн → payment_77</text>
+    <path d="M380 170 L668 170" class="arrow"/>
+    <text x="524" y="162" text-anchor="middle" class="mono small">SAVE k1 → {201, payment_77}</text>
+    <path d="M378 200 L200 200" class="arrow" style="stroke-dasharray:4 4"/>
+    <text x="290" y="192" text-anchor="middle" class="small red">✕ мережа обірвалась</text>
+
+    <path d="M90 240 L378 240" class="arrow"/>
+    <text x="234" y="232" text-anchor="middle" class="mono">POST /payments  Idempotency-Key: k1 (повтор)</text>
+    <path d="M380 265 L668 265" class="arrow"/>
+    <text x="524" y="257" text-anchor="middle" class="mono small">k1 є? → так → збережена відповідь</text>
+    <path d="M378 300 L92 300" class="arrow"/>
+    <text x="234" y="292" text-anchor="middle" class="mono">201 payment_77 (без другого списання)</text>
+  </svg>
+  <figcaption>Сервер зберігає результат за ключем (зазвичай 24 год) і при повторі віддає той самий — гроші списуються один раз.</figcaption>
+</figure>
+
+<pre><code class="language-js">// middleware ідемпотентності (Redis)
+export const idempotent = (redis) => async (req, res, next) => {
+  const key = req.get("Idempotency-Key");
+  if (!key) return next();                                   // або 400, якщо ключ обов'язковий
+  const storeKey = `idem:${req.user.id}:${key}`;             // ключ належить користувачу — чужий не підмінить
+  const cached = await redis.get(storeKey);
+  if (cached) { const { status, body } = JSON.parse(cached); return res.status(status).json(body); }
+
+  const locked = await redis.set(`${storeKey}:lock`, "1", "NX", "EX", 30); // паралельний повтор → 409
+  if (!locked) return res.status(409).json({ title: "Request in progress" });
+
+  const json = res.json.bind(res);
+  res.json = async (body) => {                               // перехоплюємо відповідь, щоб зберегти
+    await redis.set(storeKey, JSON.stringify({ status: res.statusCode, body }), "EX", 86_400);
+    await redis.del(`${storeKey}:lock`);
+    return json(body);
+  };
+  next();
+};
+app.post("/payments", requireAuth, idempotent(redis), createPayment);</code></pre>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Вивчіть, як Stripe документує API: кожен endpoint має приклади для всіх мов, кожна помилка — код і пояснення, версії — дати, зміни — changelog із міграцією, а ідемпотентність і webhooks — окремі розділи. Це еталон не тому, що красиво, а тому, що кожне рішення там продиктоване болем реальних інтеграцій. Друге джерело — Google API Design Guide: стандарт для всіх Google Cloud API, який пояснює resource-oriented design, стандартні методи (List/Get/Create/Update/Delete), довгі операції (<code>Operation</code> для async) і поля-маски для часткових оновлень. Читаючи обидва, ви побачите, що REST у великих компаніях — це набір дуже конкретних конвенцій, а не «щось із HTTP-методами».</p>
+</div>
+
+<h2 id="s10">10. Практика: API нотаток в OpenAPI і генерація клієнта</h2>
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Візьми <code>openapi.yaml</code> з §4, збережи поруч із API нотаток із розділу 04. Запусти <code>npx @redocly/cli lint openapi.yaml</code> і виправ зауваження.</li>
+    <li>Підніми Swagger UI (<code>docker run</code> з §4) і виконай запити прямо з браузера кнопкою «Try it out».</li>
+    <li>Згенеруй типи: <code>npx openapi-typescript openapi.yaml -o api-types.d.ts</code>. Відкрий файл — там інтерфейси для кожного шляху й відповіді.</li>
+    <li>Встанови <code>openapi-fetch</code> і напиши клієнт:
+<pre><code class="language-ts">import createClient from "openapi-fetch";
+import type { paths } from "./api-types";
+
+const client = createClient&lt;paths&gt;({ baseUrl: "http://localhost:3000/api" });
+const { data, error } = await client.GET("/notes", { params: { query: { status: "active", limit: 10 } } });
+//     ^ data типізований як { data: Note[], pageInfo }, а status: "foo" — помилка компіляції
+const created = await client.POST("/notes", { body: { title: "Зі спеки" } });</code></pre></li>
+    <li>Додай до бекенду валідацію запитів за спекою (<code>express-openapi-validator</code>) — надішли <code>{ "title": "" }</code> і отримай 400 автоматично.</li>
+    <li>Зміни у спеці <code>title</code> на <code>text</code>, перегенеруй типи — і подивись, скільки місць у клієнті перестало компілюватися. Це і є контракт у дії.</li>
+  </ol>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам: реальний час і webhooks</div>
+  <ol>
+    <li>Додай до API нотаток endpoint <code>GET /api/notes/events</code> на SSE, який надсилає подію при кожному створенні нотатки. Відкрий дві вкладки: створи нотатку в одній — побачиш її в іншій.</li>
+    <li>Перепиши те саме на WebSocket з <code>ws</code>. Порівняй кількість коду й поведінку при перезапуску сервера (SSE перепідключиться сам).</li>
+    <li>Зроби «провайдера webhook»: при створенні нотатки твій сервер робить <code>POST</code> на URL із <a href="https://webhook.site" target="_blank" rel="noopener">webhook.site</a> з підписом <code>X-Signature</code>. Потім напиши «приймача» на іншому порту, який перевіряє підпис і відхиляє підроблений запит через curl.</li>
+    <li>Додай <code>Idempotency-Key</code> до <code>POST /api/notes</code>. Надішли той самий запит двічі — переконайся, що нотатка одна.</li>
+  </ol>
+</div>
+
+<div class="box warn">
+  <div class="title">Типові помилки в дизайні API</div>
+  <ul>
+    <li>200 на все, а помилка — у тілі. Моніторинг сліпий, кеші кешують помилки.</li>
+    <li>Різні форми помилок у різних endpoint'ах. Один формат (RFC 9457) — і клієнт пише один обробник.</li>
+    <li>Offset-пагінація на стрічках, що постійно змінюються — дублікати і пропуски.</li>
+    <li>Без лімітів: <code>GET /notes</code> повертає всі 2 мільйони. Завжди <code>limit</code> з максимумом.</li>
+    <li>Витік внутрішніх деталей: stack trace, SQL, назви таблиць у відповідях.</li>
+    <li>Ламання контракту без версії/deprecation — мобільні клієнти оновлюються тижнями.</li>
+    <li>Webhook без перевірки підпису і без ідемпотентності — подвійні замовлення й підроблені платежі.</li>
+  </ul>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чому PUT ідемпотентний, а POST — ні?</summary><p>PUT повністю замінює ресурс: два однакові PUT дають той самий стан. POST створює новий ресурс щоразу — два POST = два ресурси. Тому для безпечного повтору POST потрібен Idempotency-Key.</p></details>
+  <details><summary>2. Коли cursor-пагінація краща за offset?</summary><p>На великих або часто змінюваних колекціях: offset змушує БД читати всі пропущені рядки і дає дублікати при вставках; cursor використовує індекс (WHERE id &gt; X) і стабільний. Offset кращий, коли треба «перейти на сторінку N».</p></details>
+  <details><summary>3. Що дає RFC 9457?</summary><p>Єдиний формат помилок (type, title, status, detail, instance) з Content-Type application/problem+json, розширюваний власними полями. Клієнт пише один обробник для всіх помилок.</p></details>
+  <details><summary>4. Що таке N+1 у GraphQL і як його лікує DataLoader?</summary><p>Resolver вкладеного поля викликається для кожного елемента списку, роблячи N окремих запитів до БД плюс один на список. DataLoader збирає всі load(id) за один tick event loop і робить один запит WHERE id IN (...), повертаючи кожному його результат; плюс кешує в межах запиту.</p></details>
+  <details><summary>5. Коли обрати SSE замість WebSocket?</summary><p>Коли дані течуть лише від сервера до клієнта: SSE — звичайний HTTP, працює через проксі і CDN, має вбудований reconnect і Last-Event-ID, не потребує окремої інфраструктури. WebSocket — коли потрібен двонаправлений або бінарний обмін з низькою затримкою.</p></details>
+  <details><summary>6. Навіщо перевіряти підпис webhook, якщо URL секретний?</summary><p>URL витікає через логи і репозиторії; без підпису будь-хто може надіслати підроблену подію. HMAC-підпис із секретом, що не передається мережею, і timestamp у ньому доводять автентичність і захищають від replay.</p></details>
+  <details><summary>7. Чим tRPC відрізняється від gRPC?</summary><p>gRPC — мовно-незалежний RPC на protobuf і HTTP/2 із кодогенерацією, для мікросервісів. tRPC — типізація end-to-end лише для TypeScript через спільні типи в монорепо, без схеми і генерації, для власного фронтенду.</p></details>
+  <details><summary>8. Які зміни в API безпечні для старих клієнтів?</summary><p>Додавання: нове поле у відповіді, необов'язковий параметр, новий endpoint. Небезпечні: видалення/перейменування полів, зміна типів, нові обов'язкові параметри, зміна семантики.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>API — контракт; його цінність у стабільності. Проєктуйте так, щоб зміни були додаваннями.</li>
+  <li>REST: іменники в URL, дії в методах; GET/PUT/DELETE ідемпотентні, POST — ні; статуси означають те, що означають.</li>
+  <li>Пагінація: offset для «сторінок», cursor для стрічок і великих даних; завжди ліміт із максимумом.</li>
+  <li>Помилки — в одному форматі (RFC 9457, application/problem+json), без витоку внутрішніх деталей.</li>
+  <li>OpenAPI: одна спека → документація, типи, клієнти, валідація, контрактні тести.</li>
+  <li>GraphQL — коли клієнтів багато і дані зв'язані; обов'язково DataLoader, ліміти глибини й складності.</li>
+  <li>gRPC — між сервісами (protobuf, HTTP/2, стріми); tRPC — для TS-монорепо без схеми.</li>
+  <li>Реальний час: polling → long polling → SSE (сервер → клієнт, просто) → WebSocket (обидва боки, складніше масштабувати).</li>
+  <li>Webhooks: HMAC-підпис + timestamp, ідемпотентність за event.id, швидка відповідь, обробка в черзі.</li>
+  <li>Платежі та інші небезпечні POST — з Idempotency-Key і збереженою відповіддю.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://restfulapi.net/" target="_blank" rel="noopener">restfulapi.net</a> — основи REST: ресурси, методи, статуси, HATEOAS простими словами.</li>
+    <li><a href="https://github.com/microsoft/api-guidelines" target="_blank" rel="noopener">Microsoft REST API Guidelines</a> — детальні правила іменування, пагінації, помилок, версій від великої компанії.</li>
+    <li><a href="https://cloud.google.com/apis/design" target="_blank" rel="noopener">Google API Design Guide</a> — resource-oriented design, стандартні методи, довгі операції; застосовно і до REST, і до gRPC.</li>
+    <li><a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener">OpenAPI Specification</a> — першоджерело формату; читайте розділи Paths, Components, Schema.</li>
+    <li><a href="https://swagger.io/docs/" target="_blank" rel="noopener">swagger.io docs</a> — інструменти навколо OpenAPI: Editor, UI, Codegen.</li>
+    <li><a href="https://www.rfc-editor.org/rfc/rfc9457.html" target="_blank" rel="noopener">RFC 9457 Problem Details</a> — стандарт формату помилок; короткий і читабельний RFC.</li>
+    <li><a href="https://graphql.org/learn/" target="_blank" rel="noopener">graphql.org/learn</a> — офіційний вступ: схеми, запити, best practices (пагінація, кешування).</li>
+    <li><a href="https://www.apollographql.com/docs/" target="_blank" rel="noopener">Apollo docs</a> — сервер і клієнт GraphQL, DataLoader, федерація для мікросервісів.</li>
+    <li><a href="https://grpc.io/docs/" target="_blank" rel="noopener">grpc.io docs</a> — концепції gRPC, Node-туторіал, види стрімінгу.</li>
+    <li><a href="https://protobuf.dev/" target="_blank" rel="noopener">protobuf.dev</a> — мова .proto, правила сумісності (номери полів, reserved).</li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API" target="_blank" rel="noopener">MDN: WebSockets API</a> та <a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events" target="_blank" rel="noopener">MDN: Server-sent events</a> — браузерні API з прикладами.</li>
+    <li><a href="https://trpc.io/docs" target="_blank" rel="noopener">trpc.io</a> — end-to-end типізація для TypeScript.</li>
+    <li><a href="https://docs.stripe.com/api" target="_blank" rel="noopener">Stripe API Reference</a> — еталон документації; окремо: <a href="https://docs.stripe.com/api/idempotent_requests" target="_blank" rel="noopener">Idempotent requests</a> і <a href="https://docs.stripe.com/webhooks" target="_blank" rel="noopener">Webhooks</a>.</li>
+    <li><a href="https://roadmap.sh/api-design" target="_blank" rel="noopener">roadmap.sh/api-design</a> — карта тем дизайну API для самоперевірки.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 09</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

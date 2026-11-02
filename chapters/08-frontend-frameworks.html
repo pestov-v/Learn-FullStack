@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>08. React, Next.js, стан застосунку — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 08 · <span class="level-badge level-2">Середній</span></div>
+  <h1>React, Next.js, стан застосунку</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, навіщо потрібен фреймворк, як React перетворює дані на інтерфейс і навпаки, де тримати стан, чим відрізняються CSR/SSR/SSG/ISR і як Next.js App Router ділить код між сервером і браузером.</p>
+  <div class="meta"><span>⏱ ~120 хв</span><span>📚 Передумови: розділи 02, 04</span><span>🎯 Ціль: застосунок нотаток на React + TanStack Query</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Навіщо фреймворк: проблема ручного DOM</a></li>
+    <li><a href="#s2">React: компоненти, JSX, props, state</a></li>
+    <li><a href="#s3">Рендер, Virtual DOM і reconciliation</a></li>
+    <li><a href="#s4">useEffect і його пастки; списки, форми, умовний рендер</a></li>
+    <li><a href="#s5">Потік даних: підйом стану і контекст</a></li>
+    <li><a href="#s6">Керування станом: локальний → Context → Zustand/Redux → TanStack Query</a></li>
+    <li><a href="#s7">Роутинг і рендеринг: CSR, SSR, SSG, ISR</a></li>
+    <li><a href="#s8">Next.js App Router: Server і Client Components</a></li>
+    <li><a href="#s9">Стилізація: CSS Modules, Tailwind, shadcn/ui</a></li>
+    <li><a href="#s10">Продуктивність: memo, lazy, Core Web Vitals</a></li>
+    <li><a href="#s11">Інші фреймворки і практика</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви, що тобі треба збудувати замок. Можна ліпити його з глини: кожну вежу, кожне віконце — руками, і якщо захочеш пересунути двері, доведеться ламати стіну. А можна взяти LEGO: готові блоки, які з'єднуються за правилами; вежу збираєш один раз і потім ставиш її хоч десять разів. <b>React</b> — це LEGO для інтерфейсів: ти описуєш блоки (компоненти) і кажеш, який вигляд вони мають при яких даних, а React сам переставляє деталі, коли дані змінюються. <b>Next.js</b> — це набір LEGO з інструкцією: уже є коробка, у якій розкладено, як робити сторінки, як їх завантажувати швидко і як частину роботи робити ще «на фабриці» (на сервері), щоб дитині (браузеру) дісталося менше збирати.</p>
+</div>
+
+<h2 id="s1">1. Навіщо фреймворк: проблема ручного DOM</h2>
+<p>У розділі 02 ми змінювали сторінку через <code>document.querySelector</code> і <code>innerHTML</code>. Для кнопки-лічильника цього достатньо. Але уявіть список із 200 нотаток, де можна редагувати, фільтрувати, позначати виконані і бачити лічильник невиконаних. Тепер кожна зміна даних — це ланцюжок питань: який елемент оновити? чи додано новий? чи змінився лічильник? а якщо фільтр активний? Дані живуть у змінних, вигляд — у DOM, і ви вручну синхронізуєте два світи. Через місяць у коді десять місць, де оновлюється лічильник, і три з них забувають про фільтр.</p>
+<p>Фреймворк перевертає підхід: ви <b>описуєте, який вигляд має інтерфейс для даного стану</b> (декларативно), а не як крок за кроком дійти до нього (імперативно). Змінився стан → фреймворк сам обчислює, що саме в DOM треба змінити. Формула: <code>UI = f(state)</code>.</p>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Більшість багів інтерфейсу — це розсинхронізація: дані кажуть одне, екран показує інше. Декларативний підхід прибирає цілий клас таких багів, бо екран завжди є функцією від даних. Ви думаєте про стан, а не про DOM-операції.</p>
+</div>
+
+<h2 id="s2">2. React: компоненти, JSX, props, state</h2>
+<p><b>Компонент (component)</b> — це JavaScript-функція, яка приймає <b>props</b> (властивості, вхідні дані) і повертає опис розмітки. <b>JSX</b> — синтаксис, схожий на HTML, який компілюється у виклики <code>createElement</code>. Це не рядок і не HTML — це об'єкти-описи.</p>
+<pre><code class="language-jsx">// Note.jsx — компонент = функція від props
+export function Note({ title, done, onToggle }) {
+  // JSX: усередині фігурних дужок — будь-який JS-вираз
+  return (
+    &lt;li className={done ? "note done" : "note"}&gt;
+      &lt;input type="checkbox" checked={done} onChange={onToggle} /&gt;
+      &lt;span&gt;{title}&lt;/span&gt;
+    &lt;/li&gt;
+  );
+}
+
+// Використання: props передаються як атрибути
+&lt;Note title="Купити молоко" done={false} onToggle={() =&gt; console.log("клік")} /&gt;</code></pre>
+<p>Props — <i>тільки для читання</i>. Компонент не може змінити свої props, як функція не може змінити аргументи у викликача. Дані «згори вниз».</p>
+<p><b>State (стан)</b> — пам'ять компонента, яка змінюється з часом і належить самому компоненту. Хук <code>useState</code> повертає поточне значення і функцію для зміни; виклик цієї функції каже React: «дані змінилися, перемалюй мене».</p>
+<pre><code class="language-jsx">import { useState } from "react";
+
+export function Counter() {
+  const [count, setCount] = useState(0); // початкове значення 0
+
+  return (
+    &lt;button onClick={() =&gt; setCount(c =&gt; c + 1)}&gt;
+      {/* функціональна форма: безпечна при кількох оновленнях підряд */}
+      Натиснуто {count} разів
+    &lt;/button&gt;
+  );
+}</code></pre>
+<p>Правила хуків: викликати лише на верхньому рівні компонента (не в умовах і циклах) і лише в компонентах або інших хуках. Причина — React запам'ятовує хуки за порядком виклику.</p>
+
+<h2 id="s3">3. Рендер, Virtual DOM і reconciliation</h2>
+<p>Що відбувається, коли ви викликаєте <code>setCount</code>?</p>
+<ol>
+  <li><b>Тригер</b>: React планує повторний рендер компонента (і всіх його нащадків).</li>
+  <li><b>Рендер</b>: React викликає вашу функцію знову й отримує нове дерево описів — <b>Virtual DOM</b> (легкі JS-об'єкти, не справжні DOM-вузли).</li>
+  <li><b>Reconciliation (звірка)</b>: React порівнює нове дерево з попереднім (алгоритм diffing) і складає мінімальний список змін.</li>
+  <li><b>Commit</b>: тільки ці зміни застосовуються до справжнього DOM — найдорожчої частини.</li>
+</ol>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Цикл рендеру React: стан, Virtual DOM, diff, commit">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="40" width="140" height="70" rx="14" class="accent"/>
+    <text x="80" y="68" text-anchor="middle" class="bold">setState</text>
+    <text x="80" y="90" text-anchor="middle" class="small">count: 0 → 1</text>
+    <path d="M150 75 L200 75" class="arrow"/>
+    <rect x="200" y="40" width="150" height="70" rx="14" class="blue"/>
+    <text x="275" y="68" text-anchor="middle" class="bold">Рендер</text>
+    <text x="275" y="90" text-anchor="middle" class="small">виклик Counter()</text>
+    <path d="M350 75 L400 75" class="arrow"/>
+    <rect x="400" y="20" width="160" height="110" rx="14" class="purple"/>
+    <text x="480" y="45" text-anchor="middle" class="bold">Diff (звірка)</text>
+    <text x="480" y="70" text-anchor="middle" class="mono small">старе: &lt;button&gt;0&lt;/button&gt;</text>
+    <text x="480" y="90" text-anchor="middle" class="mono small">нове:  &lt;button&gt;1&lt;/button&gt;</text>
+    <text x="480" y="115" text-anchor="middle" class="small">змінився лише текст</text>
+    <path d="M560 75 L610 75" class="arrow"/>
+    <rect x="610" y="40" width="140" height="70" rx="14" class="green"/>
+    <text x="680" y="68" text-anchor="middle" class="bold">Commit</text>
+    <text x="680" y="90" text-anchor="middle" class="small">1 операція в DOM</text>
+
+    <rect x="10" y="170" width="740" height="110" rx="14" class="box-fill"/>
+    <text x="380" y="195" text-anchor="middle" class="bold">Два дерева у пам'яті</text>
+    <text x="200" y="222" text-anchor="middle" class="small">Virtual DOM (JS-об'єкти)</text>
+    <text x="200" y="242" text-anchor="middle" class="mono small">{type:"button", props:{children:1}}</text>
+    <text x="200" y="262" text-anchor="middle" class="muted">дешево створювати і порівнювати</text>
+    <path d="M330 240 L430 240" class="arrow"/>
+    <text x="380" y="230" text-anchor="middle" class="small">мінімальний патч</text>
+    <text x="580" y="222" text-anchor="middle" class="small">Справжній DOM</text>
+    <text x="580" y="242" text-anchor="middle" class="mono small">HTMLButtonElement</text>
+    <text x="580" y="262" text-anchor="middle" class="muted">дорого: layout, paint</text>
+  </svg>
+  <figcaption>React не «перемальовує все». Він переобчислює опис і застосовує лише різницю до справжнього DOM.</figcaption>
+</figure>
+
+<p>Важливий наслідок: <b>рендер компонента ≠ оновлення DOM</b>. Функція може викликатися часто (це дешево), а DOM змінюється рідко. Друге правило: коли рендериться батько, за замовчуванням рендеряться всі діти — незалежно від того, чи змінилися їхні props. Звідси й оптимізації з розділу 10.</p>
+
+<h2 id="s4">4. useEffect і його пастки; списки, форми, умовний рендер</h2>
+<h3>useEffect: синхронізація із зовнішнім світом</h3>
+<p>Компонент має бути чистою функцією від props і state. Але іноді треба взаємодіяти з тим, що поза React: підписатися на WebSocket, змінити <code>document.title</code>, запустити таймер. Для цього — <code>useEffect</code>: «після того, як цей рендер потрапив на екран, виконай ось це; а коли я зникну або залежності зміняться — прибери за собою».</p>
+<pre><code class="language-jsx">import { useEffect, useState } from "react";
+
+export function OnlineStatus() {
+  const [online, setOnline] = useState(navigator.onLine);
+
+  useEffect(() =&gt; {
+    const on = () =&gt; setOnline(true);
+    const off = () =&gt; setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    // cleanup: React викличе перед наступним запуском ефекту і при демонтажі
+    return () =&gt; {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []); // [] — залежностей нема: підписатися один раз
+
+  return &lt;span&gt;{online ? "🟢 онлайн" : "🔴 офлайн"}&lt;/span&gt;;
+}</code></pre>
+<p>Пастки, у які потрапляють усі:</p>
+<ul>
+  <li><b>Неповний масив залежностей.</b> Ефект «бачить» значення з того рендеру, в якому був створений (замикання). Якщо ви використали <code>userId</code> усередині, а в масив не додали — ефект працюватиме зі старим <code>userId</code>. Правило: усе, що використовується, — у залежностях. Лінтер <code>react-hooks/exhaustive-deps</code> — ваш друг, не ворог.</li>
+  <li><b>Об'єкт або функція в залежностях.</b> Вони створюються заново при кожному рендері → ефект запускається щоразу. Виносьте константи назовні або мемоізуйте (<code>useMemo</code>/<code>useCallback</code>), або кладіть у залежності примітиви.</li>
+  <li><b>Гонка запитів.</b> Ефект робить <code>fetch</code> для <code>id=1</code>, користувач швидко переключився на <code>id=2</code>; відповідь для 1 прийшла пізніше і перезаписала дані. Ліки — прапорець <code>ignore</code> у cleanup або <code>AbortController</code>. Ще краще — не робити fetch у useEffect взагалі, а використовувати TanStack Query (далі).</li>
+  <li><b>useEffect для похідних даних.</b> Якщо <code>fullName</code> обчислюється з <code>first</code> і <code>last</code> — просто обчисліть у тілі компонента. Ефект + setState тут дає зайвий рендер і плутанину.</li>
+  <li><b>Подвійний запуск у Strict Mode</b> — це навмисно, щоб перевірити, що cleanup написаний правильно. У продакшені так не буде.</li>
+</ul>
+
+<h3>Списки і ключі</h3>
+<pre><code class="language-jsx">{notes.map(note =&gt; (
+  &lt;Note key={note.id} {...note} /&gt;   // key — стабільний id, НЕ індекс масиву
+))}</code></pre>
+<p><code>key</code> каже React, який елемент є яким між рендерами. З індексом масиву при видаленні першого елемента всі решта «зсуваються»: React вирішить, що змінився вміст кожного, а не зник один — зайві оновлення DOM і, гірше, стан полів вводу «переїде» до сусідів.</p>
+
+<h3>Форми</h3>
+<pre><code class="language-jsx">export function NoteForm({ onSubmit }) {
+  const [title, setTitle] = useState("");             // керований (controlled) input
+  function handleSubmit(e) {
+    e.preventDefault();                               // не перезавантажувати сторінку
+    if (!title.trim()) return;
+    onSubmit(title.trim());
+    setTitle("");
+  }
+  return (
+    &lt;form onSubmit={handleSubmit}&gt;
+      &lt;input value={title} onChange={e =&gt; setTitle(e.target.value)} placeholder="Нова нотатка" /&gt;
+      &lt;button disabled={!title.trim()}&gt;Додати&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+
+<h3>Умовний рендер</h3>
+<pre><code class="language-jsx">{isLoading &amp;&amp; &lt;Spinner /&gt;}                       {/* && — коли треба показати або нічого */}
+{error ? &lt;p&gt;{error.message}&lt;/p&gt; : &lt;List /&gt;}      {/* тернарний — одне з двох */}
+{notes.length === 0 &amp;&amp; &lt;p&gt;Порожньо&lt;/p&gt;}          {/* обережно: {count && ...} виведе "0"! */}</code></pre>
+
+<h2 id="s5">5. Потік даних: підйом стану і контекст</h2>
+<p>Два компоненти-брати мають бачити один і той самий стан? Стан треба <b>підняти (lift state up)</b> до найближчого спільного предка. Дані течуть вниз через props, події — вгору через callback-функції у props.</p>
+
+<figure>
+  <svg viewBox="0 0 760 340" role="img" aria-label="Дерево компонентів: дані вниз, події вгору">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="280" y="20" width="200" height="70" rx="14" class="accent"/>
+    <text x="380" y="45" text-anchor="middle" class="bold">App</text>
+    <text x="380" y="65" text-anchor="middle" class="mono small">[notes, setNotes] = useState</text>
+    <text x="380" y="82" text-anchor="middle" class="muted">власник стану</text>
+
+    <path d="M330 90 L190 160" class="arrow"/>
+    <text x="215" y="118" text-anchor="middle" class="mono small">notes={notes}</text>
+    <path d="M430 90 L570 160" class="arrow"/>
+    <text x="560" y="118" text-anchor="middle" class="mono small">onAdd={fn}</text>
+
+    <rect x="90" y="160" width="200" height="60" rx="14" class="blue"/>
+    <text x="190" y="185" text-anchor="middle" class="bold">NoteList</text>
+    <text x="190" y="205" text-anchor="middle" class="small">показує notes</text>
+    <rect x="470" y="160" width="200" height="60" rx="14" class="blue"/>
+    <text x="570" y="185" text-anchor="middle" class="bold">NoteForm</text>
+    <text x="570" y="205" text-anchor="middle" class="small">викликає onAdd("...")</text>
+
+    <path d="M150 220 L120 280" class="arrow"/>
+    <path d="M230 220 L260 280" class="arrow"/>
+    <rect x="60" y="280" width="120" height="44" rx="12" class="green"/>
+    <text x="120" y="307" text-anchor="middle" class="small">Note</text>
+    <rect x="200" y="280" width="120" height="44" rx="12" class="green"/>
+    <text x="260" y="307" text-anchor="middle" class="small">Note</text>
+
+    <path d="M600 160 L470 95" class="arrow dashed"/>
+    <text x="660" y="140" text-anchor="middle" class="mono small">подія ↑</text>
+    <text x="380" y="330" text-anchor="middle" class="muted">Суцільні стрілки — дані (props) вниз; пунктир — подія через callback угору</text>
+  </svg>
+  <figcaption>Односпрямований потік даних: єдине джерело правди в предку, діти лише показують і повідомляють.</figcaption>
+</figure>
+
+<p>Коли дані потрібні на п'ять рівнів нижче, а проміжні компоненти їх просто «прокидають» (prop drilling), на допомогу приходить <b>Context</b>: предок «оголошує» значення, будь-який нащадок читає його напряму.</p>
+<pre><code class="language-jsx">import { createContext, useContext, useState } from "react";
+
+const ThemeContext = createContext("light");
+
+export function ThemeProvider({ children }) {
+  const [theme, setTheme] = useState("light");
+  return (
+    &lt;ThemeContext value={{ theme, toggle: () =&gt; setTheme(t =&gt; t === "light" ? "dark" : "light") }}&gt;
+      {children}
+    &lt;/ThemeContext&gt;   // React 19: &lt;Context&gt; замість &lt;Context.Provider&gt;
+  );
+}
+
+export function ThemeButton() {
+  const { theme, toggle } = useContext(ThemeContext); // або use(ThemeContext) у React 19
+  return &lt;button onClick={toggle}&gt;Тема: {theme}&lt;/button&gt;;
+}</code></pre>
+<p>Обмеження контексту: зміна значення перерендерює <i>всіх</i> споживачів. Для теми чи поточного користувача це чудово; для стану, що змінюється 60 разів на секунду, — ні.</p>
+
+<h2 id="s6">6. Керування станом: локальний → Context → Zustand/Redux → TanStack Query</h2>
+<p>Перше питання, яке треба ставити: <b>який це стан?</b></p>
+<div class="table-wrap">
+<table>
+  <tr><th>Тип стану</th><th>Приклад</th><th>Інструмент</th></tr>
+  <tr><td>Локальний UI</td><td>відкритий дропдаун, текст у полі</td><td><code>useState</code> у компоненті</td></tr>
+  <tr><td>Спільний для піддерева</td><td>вибрана вкладка у формі-майстрі</td><td>підйом стану + props</td></tr>
+  <tr><td>Глобальний, рідко змінюваний</td><td>тема, локаль, поточний користувач</td><td>Context</td></tr>
+  <tr><td>Глобальний, часто змінюваний, складна логіка</td><td>кошик, редактор, гра</td><td>Zustand / Redux Toolkit</td></tr>
+  <tr><td>Серверний (кеш даних з API)</td><td>список нотаток, профіль, товари</td><td>TanStack Query / SWR</td></tr>
+  <tr><td>Стан у URL</td><td>фільтри, сторінка, пошук</td><td>роутер, <code>useSearchParams</code></td></tr>
+</table>
+</div>
+<p>Ключова ідея останніх років: <b>серверний стан — це не стан, а кеш</b>. Список нотаток не належить браузеру — він належить серверу, а у нас лише копія, яка може застаріти. Redux-стор із «списком нотаток» плюс ручними <code>isLoading</code>/<code>error</code>/refetch — це самописний кеш без інвалідації. TanStack Query робить це за вас.</p>
+
+<h3>Zustand: глобальний стан без церемоній</h3>
+<pre><code class="language-js">import { create } from "zustand";
+
+export const useCart = create((set) =&gt; ({
+  items: [],
+  add: (product) =&gt; set(s =&gt; ({ items: [...s.items, product] })),
+  clear: () =&gt; set({ items: [] }),
+}));
+
+// у компоненті: підписка лише на потрібний зріз → рендер тільки коли він змінився
+const count = useCart(s =&gt; s.items.length);</code></pre>
+<p>Redux Toolkit — та сама ідея з більшою структурою (slices, reducers, devtools з time-travel), доречна у великих командах, де важлива однаковість.</p>
+
+<h3>TanStack Query: серверний стан як кеш</h3>
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Життєвий цикл кешу TanStack Query: fresh, stale, refetch, gc">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="30" width="150" height="70" rx="14" class="blue"/>
+    <text x="85" y="58" text-anchor="middle" class="bold">Компонент</text>
+    <text x="85" y="80" text-anchor="middle" class="mono small">useQuery(['notes'])</text>
+    <path d="M160 65 L240 65" class="arrow"/>
+    <rect x="240" y="30" width="180" height="70" rx="14" class="purple"/>
+    <text x="330" y="58" text-anchor="middle" class="bold">Кеш за ключем</text>
+    <text x="330" y="80" text-anchor="middle" class="small">є дані? → віддати одразу</text>
+    <path d="M420 65 L520 65" class="arrow"/>
+    <text x="470" y="55" text-anchor="middle" class="small">нема / stale</text>
+    <rect x="520" y="30" width="120" height="70" rx="14" class="green"/>
+    <text x="580" y="58" text-anchor="middle" class="bold">queryFn</text>
+    <text x="580" y="80" text-anchor="middle" class="mono small">fetch('/api/notes')</text>
+    <path d="M580 100 L580 135 L330 135 L330 100" class="arrow"/>
+    <text x="455" y="128" text-anchor="middle" class="small">оновити кеш → перерендер</text>
+
+    <text x="20" y="180" class="bold">Стани одного запису в кеші (таймлайн):</text>
+    <rect x="20" y="195" width="160" height="50" rx="10" class="green"/>
+    <text x="100" y="216" text-anchor="middle" class="bold small">fresh</text>
+    <text x="100" y="234" text-anchor="middle" class="small">staleTime, напр. 30с</text>
+    <path d="M180 220 L215 220" class="arrow"/>
+    <rect x="215" y="195" width="160" height="50" rx="10" class="accent"/>
+    <text x="295" y="216" text-anchor="middle" class="bold small">stale</text>
+    <text x="295" y="234" text-anchor="middle" class="small">показуємо, але оновимо</text>
+    <path d="M375 220 L410 220" class="arrow"/>
+    <rect x="410" y="195" width="160" height="50" rx="10" class="blue"/>
+    <text x="490" y="216" text-anchor="middle" class="bold small">refetch</text>
+    <text x="490" y="234" text-anchor="middle" class="small">фокус вікна, mount, інтервал</text>
+    <path d="M570 220 L605 220" class="arrow"/>
+    <rect x="605" y="195" width="140" height="50" rx="10" class="red"/>
+    <text x="675" y="216" text-anchor="middle" class="bold small">inactive → gc</text>
+    <text x="675" y="234" text-anchor="middle" class="small">gcTime, напр. 5хв</text>
+    <text x="380" y="285" text-anchor="middle" class="small">Мутація → invalidateQueries(['notes']) → stale → автоматичний refetch там, де дані показані</text>
+    <text x="380" y="310" text-anchor="middle" class="muted">Stale-while-revalidate: користувач бачить старе миттєво, свіже приходить слідом</text>
+  </svg>
+  <figcaption>TanStack Query розділяє «чи дані є» і «чи вони свіжі» — і сам вирішує, коли перезапитати.</figcaption>
+</figure>
+
+<pre><code class="language-jsx">import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+const api = {
+  list: () =&gt; fetch("/api/notes").then(r =&gt; r.ok ? r.json() : Promise.reject(new Error(r.statusText))),
+  create: (title) =&gt; fetch("/api/notes", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),
+  }).then(r =&gt; r.json()),
+};
+
+export function Notes() {
+  const qc = useQueryClient();
+  const { data: notes = [], isPending, error } = useQuery({
+    queryKey: ["notes"],          // ключ кешу: масив, можна з параметрами ["notes", { page }]
+    queryFn: api.list,
+    staleTime: 30_000,            // 30с вважаємо свіжими — без зайвих запитів
+  });
+  const add = useMutation({
+    mutationFn: api.create,
+    onSuccess: () =&gt; qc.invalidateQueries({ queryKey: ["notes"] }), // позначити застарілим → refetch
+  });
+
+  if (isPending) return &lt;p&gt;Завантаження…&lt;/p&gt;;
+  if (error) return &lt;p&gt;Помилка: {error.message}&lt;/p&gt;;
+  return (
+    &lt;&gt;
+      &lt;NoteForm onSubmit={title =&gt; add.mutate(title)} /&gt;
+      &lt;ul&gt;{notes.map(n =&gt; &lt;li key={n.id}&gt;{n.title}&lt;/li&gt;)}&lt;/ul&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+
+<div class="box why">
+  <div class="title">Чому «fetch у useEffect» — антипатерн для реальних застосунків</div>
+  <p>Ручний fetch у ефекті не має кешу (кожен монтаж — новий запит), не дедуплікує (два компоненти — два однакових запити), не знає про гонки, не оновлюється при поверненні у вкладку, не має retry. Ви або напишете все це самі (і зробите гірше), або візьмете готове. Документація React прямо радить фреймворк або бібліотеку даних.</p>
+</div>
+
+<h2 id="s7">7. Роутинг і рендеринг: CSR, SSR, SSG, ISR</h2>
+<p><b>Роутинг (routing)</b> — відповідність між URL і тим, що показано. У чистому React це React Router (<code>createBrowserRouter</code>), у Next.js — файлова система: файл <code>app/notes/[id]/page.tsx</code> = маршрут <code>/notes/42</code>.</p>
+<p>Головне питання рендерингу: <b>де і коли HTML перетворюється з даних?</b></p>
+
+<figure>
+  <svg viewBox="0 0 760 420" role="img" aria-label="Таймлайни CSR, SSR, SSG, ISR">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="25" class="muted">час →</text>
+    <path d="M130 30 L740 30" class="arrow"/>
+
+    <text x="20" y="75" class="bold">CSR</text>
+    <rect x="130" y="55" width="90" height="30" rx="6" class="box-fill"/><text x="175" y="75" text-anchor="middle" class="small">порожній HTML</text>
+    <rect x="225" y="55" width="130" height="30" rx="6" class="blue"/><text x="290" y="75" text-anchor="middle" class="small">завантаж JS-бандл</text>
+    <rect x="360" y="55" width="110" height="30" rx="6" class="purple"/><text x="415" y="75" text-anchor="middle" class="small">fetch даних</text>
+    <rect x="475" y="55" width="90" height="30" rx="6" class="green"/><text x="520" y="75" text-anchor="middle" class="small">рендер</text>
+    <text x="580" y="75" class="muted small">← користувач бачить контент</text>
+
+    <text x="20" y="150" class="bold">SSR</text>
+    <rect x="130" y="130" width="150" height="30" rx="6" class="purple"/><text x="205" y="150" text-anchor="middle" class="small">сервер: дані + HTML</text>
+    <rect x="285" y="130" width="90" height="30" rx="6" class="green"/><text x="330" y="150" text-anchor="middle" class="small">HTML видно</text>
+    <rect x="380" y="130" width="130" height="30" rx="6" class="blue"/><text x="445" y="150" text-anchor="middle" class="small">JS → hydration</text>
+    <text x="520" y="150" class="muted small">← інтерактивно</text>
+    <text x="130" y="180" class="muted small">на кожен запит</text>
+
+    <text x="20" y="235" class="bold">SSG</text>
+    <rect x="130" y="215" width="120" height="30" rx="6" class="accent"/><text x="190" y="235" text-anchor="middle" class="small">build: HTML</text>
+    <text x="255" y="235" class="muted small">… (деплой, CDN) …</text>
+    <rect x="400" y="215" width="70" height="30" rx="6" class="green"/><text x="435" y="235" text-anchor="middle" class="small">видно</text>
+    <rect x="475" y="215" width="120" height="30" rx="6" class="blue"/><text x="535" y="235" text-anchor="middle" class="small">hydration</text>
+    <text x="130" y="265" class="muted small">один раз при збірці; найшвидша віддача, але дані застарівають</text>
+
+    <text x="20" y="320" class="bold">ISR</text>
+    <rect x="130" y="300" width="120" height="30" rx="6" class="accent"/><text x="190" y="320" text-anchor="middle" class="small">build: HTML</text>
+    <rect x="255" y="300" width="70" height="30" rx="6" class="green"/><text x="290" y="320" text-anchor="middle" class="small">видно</text>
+    <text x="330" y="320" class="muted small">revalidate: 60с минуло →</text>
+    <rect x="500" y="300" width="70" height="30" rx="6" class="green"/><text x="535" y="320" text-anchor="middle" class="small">старе</text>
+    <rect x="575" y="300" width="160" height="30" rx="6" class="purple"/><text x="655" y="320" text-anchor="middle" class="small">фоново перегенерувати</text>
+    <text x="130" y="350" class="muted small">статика, що оновлюється сама: наступний відвідувач отримає свіже</text>
+    <text x="380" y="400" text-anchor="middle" class="muted">Hydration — JS «оживляє» готовий HTML: вішає обробники, відновлює стан</text>
+  </svg>
+  <figcaption>Чим лівіше зелений блок — тим швидше користувач бачить контент. Але кожна стратегія має ціну.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <tr><th>Стратегія</th><th>Де рендер</th><th>Плюси</th><th>Мінуси</th><th>Для чого</th></tr>
+  <tr><td><b>CSR</b> (Client-Side Rendering)</td><td>Браузер</td><td>Простий хостинг (статика), багата інтерактивність</td><td>Порожній перший екран, поганий SEO, повільно на слабких телефонах</td><td>Адмінки, дашборди за логіном</td></tr>
+  <tr><td><b>SSR</b> (Server-Side Rendering)</td><td>Сервер на кожен запит</td><td>Швидкий перший контент, SEO, персоналізація</td><td>Потрібен сервер Node, навантаження, TTFB залежить від даних</td><td>Стрічки, персональні сторінки, e-commerce</td></tr>
+  <tr><td><b>SSG</b> (Static Site Generation)</td><td>При збірці</td><td>Найшвидше, CDN, дешево, надійно</td><td>Дані застарівають; довга збірка на тисячах сторінок</td><td>Блоги, документація, лендинги</td></tr>
+  <tr><td><b>ISR</b> (Incremental Static Regeneration)</td><td>При збірці + фонове оновлення</td><td>Швидкість статики + свіжість</td><td>Перший відвідувач після revalidate бачить старе; специфіка платформи</td><td>Каталоги, новини, картки товарів</td></tr>
+</table>
+</div>
+
+<h2 id="s8">8. Next.js App Router: Server і Client Components</h2>
+<p>Next.js 13+ (App Router) додає принципово нове: <b>React Server Components (RSC)</b>. Компонент може виконуватися <i>лише на сервері</i>: він має доступ до бази, файлів, секретів, а його код <i>не потрапляє</i> в JS-бандл браузера. Результат передається браузеру як серіалізоване дерево.</p>
+
+<h3>Файлова структура</h3>
+<pre><code>app/
+├── layout.tsx          # кореневий layout: &lt;html&gt;, &lt;body&gt;, навігація — обгортає всі сторінки
+├── page.tsx            # маршрут /
+├── loading.tsx         # показується, поки page.tsx чекає дані (Suspense)
+├── error.tsx           # межа помилок для цього сегмента ("use client")
+├── notes/
+│   ├── page.tsx        # /notes
+│   ├── layout.tsx      # спільна обгортка для /notes/*
+│   └── [id]/
+│       └── page.tsx    # /notes/42 — params.id === "42"
+├── api/
+│   └── notes/route.ts  # Route Handler: GET/POST /api/notes
+└── (marketing)/        # група маршрутів: не впливає на URL
+    └── about/page.tsx  # /about</code></pre>
+
+<figure>
+  <svg viewBox="0 0 760 360" role="img" aria-label="Межа між Server Components і Client Components у Next.js">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="20" width="420" height="320" rx="16" class="green"/>
+    <text x="220" y="45" text-anchor="middle" class="bold">СЕРВЕР (Node / Edge)</text>
+    <rect x="30" y="60" width="380" height="60" rx="12" class="box-fill"/>
+    <text x="220" y="83" text-anchor="middle" class="mono">app/notes/page.tsx  (Server Component)</text>
+    <text x="220" y="105" text-anchor="middle" class="small">const notes = await db.select().from(notesTable)</text>
+    <path d="M220 120 L220 150" class="arrow"/>
+    <rect x="30" y="150" width="180" height="60" rx="12" class="box-fill"/>
+    <text x="120" y="173" text-anchor="middle" class="mono small">&lt;NoteList notes={notes}/&gt;</text>
+    <text x="120" y="195" text-anchor="middle" class="small">server, 0 байт JS</text>
+    <rect x="230" y="150" width="180" height="60" rx="12" class="blue"/>
+    <text x="320" y="173" text-anchor="middle" class="mono small">&lt;SearchBox/&gt;</text>
+    <text x="320" y="195" text-anchor="middle" class="small">"use client" — межа</text>
+    <text x="220" y="245" text-anchor="middle" class="small">Може: БД, fs, секрети, async/await</text>
+    <text x="220" y="265" text-anchor="middle" class="small">Не може: useState, onClick, window</text>
+    <text x="220" y="300" text-anchor="middle" class="muted">Результат → RSC payload (серіалізоване дерево + посилання на клієнтські чанки)</text>
+
+    <path d="M430 180 L500 180" class="arrow"/>
+    <text x="465" y="170" text-anchor="middle" class="small">HTML + RSC</text>
+
+    <rect x="500" y="20" width="250" height="320" rx="16" class="blue"/>
+    <text x="625" y="45" text-anchor="middle" class="bold">БРАУЗЕР</text>
+    <rect x="520" y="60" width="210" height="60" rx="12" class="box-fill"/>
+    <text x="625" y="83" text-anchor="middle" class="small">Готовий HTML видно одразу</text>
+    <text x="625" y="105" text-anchor="middle" class="muted">NoteList — просто розмітка</text>
+    <rect x="520" y="140" width="210" height="80" rx="12" class="box-fill"/>
+    <text x="625" y="163" text-anchor="middle" class="mono small">SearchBox.js завантажено</text>
+    <text x="625" y="185" text-anchor="middle" class="small">hydration → useState, onChange</text>
+    <text x="625" y="207" text-anchor="middle" class="muted">JS лише для інтерактивних частин</text>
+    <text x="625" y="255" text-anchor="middle" class="small">Client Component може</text>
+    <text x="625" y="275" text-anchor="middle" class="small">приймати Server Component</text>
+    <text x="625" y="295" text-anchor="middle" class="small">як children — але не імпортувати</text>
+  </svg>
+  <figcaption>«use client» — це не «рендер тільки в браузері», а «цей модуль і все, що він імпортує, потрапить у бандл». Server Components — за замовчуванням.</figcaption>
+</figure>
+
+<pre><code class="language-tsx">// app/notes/page.tsx — Server Component за замовчуванням (без "use client")
+import { db } from "@/lib/db";
+import { notes } from "@/lib/schema";
+import { SearchBox } from "./search-box";
+import { addNote } from "./actions";
+
+export default async function NotesPage() {
+  // async компонент: чекаємо дані прямо тут; секрети БД не потраплять у браузер
+  const rows = await db.select().from(notes).orderBy(notes.createdAt);
+  return (
+    &lt;main&gt;
+      &lt;SearchBox /&gt;                       {/* клієнтський острів інтерактивності */}
+      &lt;form action={addNote}&gt;              {/* Server Action: працює навіть без JS */}
+        &lt;input name="title" required /&gt;
+        &lt;button&gt;Додати&lt;/button&gt;
+      &lt;/form&gt;
+      &lt;ul&gt;{rows.map(n =&gt; &lt;li key={n.id}&gt;{n.title}&lt;/li&gt;)}&lt;/ul&gt;
+    &lt;/main&gt;
+  );
+}
+
+// app/notes/actions.ts — Server Action: функція, яку клієнт викликає як RPC
+"use server";
+import { revalidatePath } from "next/cache";
+
+export async function addNote(formData: FormData) {
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title) return;                          // валідація ЗАВЖДИ на сервері
+  await db.insert(notes).values({ title });
+  revalidatePath("/notes");                    // скинути кеш сторінки → свіжий список
+}
+
+// app/notes/search-box.tsx — Client Component
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+export function SearchBox() {
+  const [q, setQ] = useState("");
+  const router = useRouter();
+  return &lt;input value={q} onChange={e =&gt; { setQ(e.target.value); router.replace(`/notes?q=${encodeURIComponent(e.target.value)}`); }} /&gt;;
+}</code></pre>
+
+<p>Ще три файли, які роблять App Router зручним:</p>
+<ul>
+  <li><code>layout.tsx</code> — обгортка, яка <i>не перемонтовується</i> при переході між дочірніми сторінками (навігація, сайдбар зберігають стан).</li>
+  <li><code>loading.tsx</code> — автоматична межа <code>Suspense</code>: скелетон показується миттєво, поки сторінка чекає дані. Разом зі streaming SSR це дає «HTML частинами».</li>
+  <li><code>error.tsx</code> — межа помилок: падіння одного сегмента не валить весь застосунок, є кнопка «спробувати ще».</li>
+</ul>
+
+<div class="box warn">
+  <div class="title">Підводні камені App Router</div>
+  <ul>
+    <li>Server Action — це публічний HTTP-endpoint. Валідуйте вхід і перевіряйте авторизацію всередині <i>кожної</i> action, як у звичайному API.</li>
+    <li>Не імпортуйте серверний модуль (з <code>db</code>, секретами) у файл із <code>"use client"</code> — він потрапить у бандл. Пакет <code>server-only</code> зробить це помилкою збірки.</li>
+    <li>Props від Server до Client Component мають бути серіалізовними: функції, класи, Date-об'єкти (у деяких версіях) — ні.</li>
+    <li>Кешування у Next.js змінювалося між версіями (13 → 14 → 15). Читайте документацію <i>саме вашої</i> версії — розділ «Caching», а не статтю дворічної давнини.</li>
+    <li>Не все має бути Server Component: якщо сторінка на 90% інтерактивна (редактор, дашборд з графіками), клієнтський підхід із TanStack Query — цілком нормально.</li>
+  </ul>
+</div>
+
+<h2 id="s9">9. Стилізація: CSS Modules, Tailwind, shadcn/ui</h2>
+<ul>
+  <li><b>CSS Modules</b> (<code>note.module.css</code> → <code>import s from "./note.module.css"</code> → <code>className={s.card}</code>). Звичайний CSS, але класи автоматично унікальні — нема глобальних конфліктів. Найпростіший старт, підтримується Next.js без налаштувань.</li>
+  <li><b>Tailwind CSS</b> — утилітарні класи прямо в JSX: <code>className="flex gap-2 rounded-xl p-4 shadow"</code>. Не пишете CSS-файли, не вигадуєте назви; дизайн-система (відступи, кольори) вбудована. Спочатку виглядає як хаос, за тиждень — не хочеться назад. Розмір CSS у продакшені мінімальний, бо невикористані класи викидаються.</li>
+  <li><b>shadcn/ui</b> — не бібліотека, а набір компонентів (кнопки, діалоги, таблиці) на Tailwind + Radix, які <i>копіюються у ваш проєкт</i> командою <code>npx shadcn add button</code>. Ви володієте кодом і змінюєте що завгодно. Доступність (a11y) — з коробки.</li>
+</ul>
+
+<h2 id="s10">10. Продуктивність: memo, lazy, Core Web Vitals</h2>
+<p>Спершу правило: <b>не оптимізуйте, поки не виміряли</b>. React DevTools → Profiler покаже, що рендериться і скільки це коштує.</p>
+<ul>
+  <li><b><code>memo(Component)</code></b> — пропустити рендер, якщо props не змінилися (порівняння поверхневе). Працює тільки якщо props стабільні — об'єкти й функції, створені в рендері батька, зламають memo; для них <code>useMemo</code>/<code>useCallback</code>. У React 19 з'явився <b>React Compiler</b>, який робить цю мемоізацію автоматично.</li>
+  <li><b><code>lazy</code> + <code>Suspense</code></b> — <b>розділення коду (code splitting)</b>: важкий компонент (редактор, графіки) завантажується окремим чанком лише коли потрібен. У Next.js — <code>next/dynamic</code>, а маршрути розділяються автоматично.</li>
+  <li><b>Віртуалізація списків</b> (TanStack Virtual) — рендерити лише видимі 30 рядків із 10 000.</li>
+  <li><b>Зображення</b> — <code>next/image</code>: автоматичні розміри, WebP/AVIF, lazy loading, без зсувів макета.</li>
+</ul>
+<pre><code class="language-jsx">import { lazy, Suspense, memo } from "react";
+
+const HeavyChart = lazy(() =&gt; import("./HeavyChart")); // окремий чанк
+
+export const NoteRow = memo(function NoteRow({ note, onToggle }) {
+  return &lt;li onClick={() =&gt; onToggle(note.id)}&gt;{note.title}&lt;/li&gt;;
+}); // перерендер лише коли note або onToggle змінилися
+
+export function Dashboard({ showChart }) {
+  return showChart
+    ? &lt;Suspense fallback={&lt;p&gt;Завантажуємо графік…&lt;/p&gt;}&gt;&lt;HeavyChart /&gt;&lt;/Suspense&gt;
+    : null;
+}</code></pre>
+
+<h3>Core Web Vitals</h3>
+<p>Google вимірює досвід користувача трьома метриками, і вони впливають на ранжування:</p>
+<ul>
+  <li><b>LCP (Largest Contentful Paint)</b> — коли на екрані з'явився найбільший елемент (герой-картинка, заголовок). Ціль ≤ 2,5 с. Ліки: SSR/SSG, пріоритет для головного зображення, менше блокувального JS.</li>
+  <li><b>INP (Interaction to Next Paint)</b> — затримка від кліку до відповіді екрана (замінила FID у 2024). Ціль ≤ 200 мс. Ліки: менше роботи в обробниках, <code>useTransition</code> для неважливих оновлень, не блокувати головний потік.</li>
+  <li><b>CLS (Cumulative Layout Shift)</b> — наскільки «стрибає» макет під час завантаження. Ціль ≤ 0,1. Ліки: задавати розміри зображень і рекламних блоків, не вставляти контент над уже видимим.</li>
+</ul>
+<p>Вимірюйте у Lighthouse (Chrome DevTools), PageSpeed Insights і, головне, у реальних користувачів (web-vitals бібліотека або Vercel Analytics).</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Ментальна модель, яка пояснює 90% «дивної» поведінки React: рендер — це знімок (snapshot). Кожен рендер має свої props, свій state, свої обробники подій і свої ефекти — всі вони бачать значення саме цього рендеру через замикання. <code>setState</code> не змінює змінну — він просить наступний знімок. Тому <code>console.log(count)</code> одразу після <code>setCount(count + 1)</code> покаже старе значення, а <code>setTimeout</code> у старому рендері побачить старий count. Прочитайте «A Complete Guide to useEffect» Дена Абрамова і «Why React Re-Renders» Джоша Комо — після них React перестає бути магією.</p>
+</div>
+
+<h2 id="s11">11. Інші фреймворки і практика</h2>
+<p>Одним абзацем про сусідів. <b>Vue</b> — теж компоненти, але з шаблонами в HTML-стилі та реактивністю «з коробки» (змінив змінну — оновилось); низький поріг входу, екосистема Nuxt. <b>Svelte</b> — компілятор: реактивність вирішується під час збірки, бандл крихітний, синтаксис найкоротший; SvelteKit — аналог Next. <b>Angular</b> — «усе включено» від Google: TypeScript, DI, RxJS, жорстка структура; популярний у корпоративних проєктах. <b>Solid</b> — виглядає як React, але без Virtual DOM: сигнали оновлюють DOM точково; найшвидший у бенчмарках. Ідеї перетікають між ними (сигнали тепер є в Angular і Vue), тож вивчивши один глибоко, інші освоїте за тиждень.</p>
+
+<h3>Практика: нотатки на React + TanStack Query</h3>
+<p>Використовуємо API нотаток із розділу 04 (<code>GET/POST/PATCH/DELETE /api/notes</code>). Створіть проєкт: <code>npm create vite@latest notes -- --template react</code>, потім <code>npm i @tanstack/react-query</code>.</p>
+<pre><code class="language-jsx">// src/main.jsx
+import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { App } from "./App";
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 10_000, retry: 1 } },
+});
+createRoot(document.getElementById("root")).render(
+  &lt;QueryClientProvider client={queryClient}&gt;&lt;App /&gt;&lt;/QueryClientProvider&gt;
+);
+
+// src/api.js — тонкий шар над fetch
+const BASE = "http://localhost:3000/api/notes";
+async function http(url, options) {
+  const res = await fetch(url, { headers: { "content-type": "application/json" }, ...options });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.status === 204 ? null : res.json();
+}
+export const notesApi = {
+  list:   ()            =&gt; http(BASE),
+  create: (title)       =&gt; http(BASE, { method: "POST", body: JSON.stringify({ title }) }),
+  toggle: (id, done)    =&gt; http(`${BASE}/${id}`, { method: "PATCH", body: JSON.stringify({ done }) }),
+  remove: (id)          =&gt; http(`${BASE}/${id}`, { method: "DELETE" }),
+};
+
+// src/App.jsx
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { notesApi } from "./api";
+
+export function App() {
+  const qc = useQueryClient();
+  const [filter, setFilter] = useState("all");                  // локальний UI-стан
+  const notesQuery = useQuery({ queryKey: ["notes"], queryFn: notesApi.list });
+
+  const invalidate = () =&gt; qc.invalidateQueries({ queryKey: ["notes"] });
+  const create = useMutation({ mutationFn: notesApi.create, onSuccess: invalidate });
+  const remove = useMutation({ mutationFn: notesApi.remove, onSuccess: invalidate });
+
+  // Оптимістичне оновлення: змінюємо кеш одразу, відкочуємо при помилці
+  const toggle = useMutation({
+    mutationFn: ({ id, done }) =&gt; notesApi.toggle(id, done),
+    onMutate: async ({ id, done }) =&gt; {
+      await qc.cancelQueries({ queryKey: ["notes"] });           // не дати refetch перезаписати
+      const prev = qc.getQueryData(["notes"]);
+      qc.setQueryData(["notes"], old =&gt; old.map(n =&gt; n.id === id ? { ...n, done } : n));
+      return { prev };                                            // контекст для відкату
+    },
+    onError: (_err, _vars, ctx) =&gt; qc.setQueryData(["notes"], ctx.prev),
+    onSettled: invalidate,
+  });
+
+  if (notesQuery.isPending) return &lt;p&gt;Завантаження…&lt;/p&gt;;
+  if (notesQuery.isError) return &lt;p&gt;Помилка: {notesQuery.error.message} &lt;button onClick={() =&gt; notesQuery.refetch()}&gt;Повторити&lt;/button&gt;&lt;/p&gt;;
+
+  const visible = notesQuery.data.filter(n =&gt; filter === "all" ? true : filter === "done" ? n.done : !n.done);
+
+  return (
+    &lt;main&gt;
+      &lt;h1&gt;Нотатки ({notesQuery.data.filter(n =&gt; !n.done).length} невиконаних)&lt;/h1&gt;
+      &lt;form onSubmit={e =&gt; { e.preventDefault(); const f = e.currentTarget; create.mutate(f.title.value); f.reset(); }}&gt;
+        &lt;input name="title" placeholder="Що зробити?" required /&gt;
+        &lt;button disabled={create.isPending}&gt;{create.isPending ? "…" : "Додати"}&lt;/button&gt;
+      &lt;/form&gt;
+      &lt;p&gt;
+        {["all", "active", "done"].map(f =&gt; (
+          &lt;button key={f} onClick={() =&gt; setFilter(f)} aria-pressed={filter === f}&gt;{f}&lt;/button&gt;
+        ))}
+      &lt;/p&gt;
+      &lt;ul&gt;
+        {visible.map(n =&gt; (
+          &lt;li key={n.id}&gt;
+            &lt;input type="checkbox" checked={n.done} onChange={e =&gt; toggle.mutate({ id: n.id, done: e.target.checked })} /&gt;
+            &lt;span style={{ textDecoration: n.done ? "line-through" : "none" }}&gt;{n.title}&lt;/span&gt;
+            &lt;button onClick={() =&gt; remove.mutate(n.id)} aria-label="Видалити"&gt;✕&lt;/button&gt;
+          &lt;/li&gt;
+        ))}
+      &lt;/ul&gt;
+      {notesQuery.isFetching &amp;&amp; &lt;small&gt;оновлюємо…&lt;/small&gt;}
+    &lt;/main&gt;
+  );
+}</code></pre>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Запусти API з розділу 04 і цей фронтенд. Відкрий React Query Devtools (<code>@tanstack/react-query-devtools</code>) і подивись, як запис <code>["notes"]</code> переходить fresh → stale → fetching.</li>
+    <li>Відкрий два вікна браузера. Додай нотатку в одному, перейди в інше — побачиш refetch при фокусі вікна.</li>
+    <li>Зупини бекенд, спробуй перемкнути чекбокс — оптимістичне оновлення покаже зміну і відкотить її після помилки.</li>
+    <li>Замість <code>key={n.id}</code> постав <code>key={index}</code>, додай у кожен рядок текстове поле і видали перший рядок. Подивись, що станеться з введеним текстом.</li>
+    <li>Постав <code>staleTime: Infinity</code> і подивись, як зникають повторні запити; потім <code>staleTime: 0</code>.</li>
+  </ol>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам: перенеси на Next.js</div>
+  <ol>
+    <li><code>npx create-next-app@latest notes-next</code> (App Router, TypeScript, Tailwind).</li>
+    <li>Зроби <code>app/notes/page.tsx</code> Server Component, який читає нотатки прямо з бази (або через <code>fetch</code> до старого API з <code>cache: "no-store"</code>).</li>
+    <li>Додавання — через Server Action з <code>revalidatePath</code>. Перевір, що форма працює з вимкненим JavaScript у DevTools.</li>
+    <li>Чекбокс «виконано» винеси у Client Component. Подивись у вкладці Network, що JS завантажується лише для нього.</li>
+    <li>Додай <code>loading.tsx</code> зі скелетоном і штучну затримку <code>await new Promise(r =&gt; setTimeout(r, 1500))</code> на сервері — подивись streaming у дії.</li>
+    <li>Запусти Lighthouse на обох версіях (Vite CSR і Next SSR) і порівняй LCP.</li>
+  </ol>
+</div>
+
+<div class="box warn">
+  <div class="title">Часті помилки новачків у React</div>
+  <ul>
+    <li>Мутація стану: <code>notes.push(x); setNotes(notes)</code> — React не побачить зміни (та сама ссилка). Завжди створюйте новий масив/об'єкт.</li>
+    <li>Виклик функції замість передачі: <code>onClick={handle()}</code> виконає одразу при рендері. Треба <code>onClick={handle}</code> або <code>onClick={() =&gt; handle(id)}</code>.</li>
+    <li>Стан у props без синхронізації: <code>useState(props.value)</code> бере значення лише при першому рендері.</li>
+    <li>Хук усередині <code>if</code> — «Rendered more hooks than during the previous render».</li>
+    <li>Ключ через <code>Math.random()</code> — новий ключ щоразу = React перестворює DOM для кожного елемента.</li>
+  </ul>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим props відрізняються від state?</summary><p>Props приходять ззовні і незмінні для компонента; state — внутрішня пам'ять, яку компонент змінює сам через setState, викликаючи перерендер.</p></details>
+  <details><summary>2. Чи означає рендер компонента, що DOM оновився?</summary><p>Ні. Рендер — це виклик функції і побудова Virtual DOM. DOM змінюється лише там, де diff знайшов різницю. Рендер може відбутися без жодної зміни DOM.</p></details>
+  <details><summary>3. Чому не можна використовувати індекс масиву як key?</summary><p>При вставці/видаленні елементів індекси зсуваються, React плутає елементи, робить зайві оновлення і «переносить» стан (наприклад, текст в input) між рядками.</p></details>
+  <details><summary>4. Що таке серверний стан і чому його не варто класти в Redux?</summary><p>Це кеш даних, які належать серверу і можуть застаріти. Йому потрібні інвалідація, дедуплікація, refetch, retry — усе це вже є в TanStack Query, а в Redux довелося б писати вручну.</p></details>
+  <details><summary>5. Чим SSR відрізняється від SSG?</summary><p>SSR генерує HTML на сервері при кожному запиті (свіжі, персоналізовані дані, потрібен сервер). SSG — один раз при збірці (найшвидше, з CDN, але дані застарівають до наступної збірки). ISR — компроміс із фоновим оновленням.</p></details>
+  <details><summary>6. Що робить директива "use client"?</summary><p>Позначає межу: цей модуль і всі його імпорти потрапляють у бандл браузера і можуть використовувати хуки та події. Без неї компонент у App Router — серверний і не надсилає JS клієнту.</p></details>
+  <details><summary>7. Що таке hydration?</summary><p>Процес, коли React у браузері «прикріплюється» до вже готового серверного HTML: будує своє дерево, вішає обробники подій і відновлює стан, не перемальовуючи розмітку.</p></details>
+  <details><summary>8. Коли memo не допоможе?</summary><p>Коли props — нові об'єкти чи функції при кожному рендері батька (поверхневе порівняння побачить різницю). Потрібні useMemo/useCallback або React Compiler.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>UI = f(state): описуємо вигляд для даних, React сам обчислює зміни DOM через Virtual DOM і diff.</li>
+  <li>Компонент — функція від props; state — його пам'ять через useState; дані вниз, події вгору.</li>
+  <li>useEffect — для синхронізації із зовнішнім світом, не для обчислень і не для fetch у реальних застосунках.</li>
+  <li>key — стабільний id; стан не мутуємо; хуки лише на верхньому рівні.</li>
+  <li>Питайте «який це стан?»: локальний → useState; глобальний → Context/Zustand; серверний → TanStack Query; фільтри → URL.</li>
+  <li>CSR/SSR/SSG/ISR — різні відповіді на «де і коли будувати HTML»; вибір залежить від свіжості даних, SEO і персоналізації.</li>
+  <li>У Next.js App Router компоненти серверні за замовчуванням; "use client" — межа для інтерактивності; Server Actions — публічні endpoint'и, валідуйте.</li>
+  <li>Оптимізація — після вимірювання: Profiler, memo/lazy, Core Web Vitals (LCP, INP, CLS).</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://react.dev/learn" target="_blank" rel="noopener">react.dev — Learn React</a> — офіційний підручник; розділи «Thinking in React», «Managing State», «Escape Hatches» обов'язкові.</li>
+    <li><a href="https://react.dev/learn/synchronizing-with-effects" target="_blank" rel="noopener">react.dev — Synchronizing with Effects</a> і «You Might Not Need an Effect» — коли ефект не потрібен.</li>
+    <li><a href="https://nextjs.org/docs" target="_blank" rel="noopener">nextjs.org/docs</a> — App Router: routing, data fetching, caching, Server Actions; читайте версію, яку використовуєте.</li>
+    <li><a href="https://tanstack.com/query/latest" target="_blank" rel="noopener">TanStack Query docs</a> — «Important Defaults» і «Optimistic Updates» пояснюють ментальну модель кешу.</li>
+    <li><a href="https://zustand.docs.pmnd.rs/" target="_blank" rel="noopener">Zustand</a> — глобальний стан на 100 рядків документації.</li>
+    <li><a href="https://redux-toolkit.js.org/" target="_blank" rel="noopener">Redux Toolkit</a> — якщо команда обрала Redux; вивчайте тільки RTK, не «класичний» Redux.</li>
+    <li><a href="https://web.dev/articles/vitals" target="_blank" rel="noopener">web.dev — Core Web Vitals</a> — визначення LCP/INP/CLS і як їх покращувати.</li>
+    <li><a href="https://www.patterns.dev/" target="_blank" rel="noopener">patterns.dev</a> — патерни рендерингу (CSR/SSR/SSG/ISR/islands) з діаграмами.</li>
+    <li><a href="https://www.joshwcomeau.com/react/why-react-re-renders/" target="_blank" rel="noopener">Josh Comeau — Why React Re-Renders</a> — найзрозуміліше пояснення рендерів і memo.</li>
+    <li><a href="https://overreacted.io/a-complete-guide-to-useeffect/" target="_blank" rel="noopener">Dan Abramov — A Complete Guide to useEffect</a> — про знімки рендеру і замикання; довго, але змінює мислення.</li>
+    <li><a href="https://tailwindcss.com/docs" target="_blank" rel="noopener">tailwindcss.com</a> — документація і шпаргалка утиліт.</li>
+    <li><a href="https://ui.shadcn.com/" target="_blank" rel="noopener">ui.shadcn.com</a> — компоненти, які копіюються у проєкт.</li>
+    <li><a href="https://roadmap.sh/react" target="_blank" rel="noopener">roadmap.sh/react</a> — карта тем React для самоперевірки.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 08</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

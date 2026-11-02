@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>10. Тестування — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 10 · <span class="level-badge level-2">Середній</span></div>
+  <h1>Тестування</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, які бувають тести, як їх писати у Vitest, Testing Library і Playwright, коли мокати, а коли ні, і чому 100 % покриття — не мета.</p>
+  <div class="meta"><span>⏱ ~90 хв</span><span>📚 Передумови: розділи 04, 05, 08</span><span>🎯 Ціль: покрити API нотаток тестами</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Навіщо тести</a></li>
+    <li><a href="#s2">Види тестів: піраміда і трофей</a></li>
+    <li><a href="#s3">Що таке добрий тест</a></li>
+    <li><a href="#s4">Vitest: перші unit-тести</a></li>
+    <li><a href="#s5">Моки, стаби, фейки, спаї</a></li>
+    <li><a href="#s6">Тестування API: supertest і тестова БД</a></li>
+    <li><a href="#s7">Тестування React: Testing Library і MSW</a></li>
+    <li><a href="#s8">E2E: Playwright</a></li>
+    <li><a href="#s9">TDD: червоний — зелений — рефакторинг</a></li>
+    <li><a href="#s10">Покриття, flaky-тести і CI</a></li>
+    <li><a href="#s11">Практика: тести для API нотаток</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви, що ти полагодив іграшкову машинку і хочеш віддати її другові. Перш ніж віддавати, ти перевіряєш: колеса крутяться? двері відчиняються? фари світять? Це і є тести. Кожна перевірка — маленька і швидка, але разом вони дають упевненість, що іграшка справді працює, а не «начебто працює».</p>
+  <p>А тепер уяви, що ти лагодиш цю машинку щодня, і щоразу треба перевіряти всі 50 деталей. Втомишся. Тому ти пишеш список перевірок один раз і просиш робота проганяти його за тебе за 10 секунд. Робот — це тестовий фреймворк, а список — ваші тести. Якщо після чергового ремонту робот кричить «колесо відпало!» — ви дізнаєтеся про це до того, як машинка потрапить до друга.</p>
+</div>
+
+<h2 id="s1">1. Навіщо тести</h2>
+<p>Тест (test) — це код, який запускає інший код і перевіряє, що результат такий, як очікувалося. Звучить просто, але за цим ховаються три великі вигоди.</p>
+<p><strong>Перша — впевненість при змінах.</strong> Без тестів кожна правка коду — це лотерея: ви поміняли одну функцію, а зламалося щось у зовсім іншому місці, про що ви дізналися від користувача через тиждень. З тестами ви дізнаєтеся про це через 10 секунд після збереження файлу. Це називають регресією (regression) — коли раніше робоча функціональність ламається через нові зміни. Тести ловлять регресії.</p>
+<p><strong>Друга — документація, яка не бреше.</strong> Коментар у коді може застаріти, README може брехати, а тест — ні: якщо тест каже «функція <code>slugify("Привіт світ")</code> повертає <code>"pryvit-svit"</code>» і тест зелений, значить, так воно і є. Новий колега відкриває тести і бачить, як користуватися модулем.</p>
+<p><strong>Третя — краща архітектура.</strong> Код, який складно протестувати, майже завжди погано спроєктований: функція робить забагато, лізе в базу даних, читає глобальні змінні і надсилає листи одночасно. Коли ви намагаєтеся написати тест і розумієте, що для цього треба підняти пів світу — це сигнал розділити код на частини.</p>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>У великих командах код без тестів не приймають у головну гілку взагалі. Не тому, що всі перфекціоністи, а тому, що без тестів кожен реліз перетворюється на ручну перевірку сотень сценаріїв, а страх щось зламати паралізує розробку. Тести — це те, що дозволяє релізити кілька разів на день, а не раз на квартал.</p>
+</div>
+
+<h2 id="s2">2. Види тестів: піраміда і трофей</h2>
+<p>Тести бувають різних «розмірів» — залежно від того, скільки коду вони охоплюють за раз.</p>
+<ul>
+  <li><strong>Модульні (unit)</strong> — перевіряють одну функцію або клас ізольовано. Швидкі (мілісекунди), їх багато. Приклад: «функція форматування дати повертає правильний рядок».</li>
+  <li><strong>Інтеграційні (integration)</strong> — перевіряють, як кілька частин працюють разом: маршрут Express + сервіс + база даних. Повільніші (десятки-сотні мілісекунд).</li>
+  <li><strong>Наскрізні (end-to-end, e2e)</strong> — запускають справжній браузер і клікають по справжньому застосунку, як користувач. Найповільніші (секунди), найкрихкіші, але й найближчі до реальності.</li>
+  <li><strong>Контрактні (contract)</strong> — перевіряють, що API віддає саме ту форму даних, на яку розраховує клієнт. Корисні, коли фронтенд і бекенд пишуть різні команди (інструменти: Pact, перевірка за OpenAPI-схемою).</li>
+  <li><strong>Снапшот-тести (snapshot)</strong> — зберігають «знімок» результату (наприклад, HTML компонента або JSON відповіді) і порівнюють з ним при наступних запусках. Зручно для великих структур, але легко перетворюються на «просто натисни <code>u</code>, щоб оновити» без думання.</li>
+  <li><strong>Продуктивності (performance)</strong> — вимірюють час або кількість запитів: «список з 1000 нотаток рендериться менш ніж за 200 мс», «ендпоінт витримує 500 RPS». Інструменти: k6, autocannon.</li>
+</ul>
+
+<figure>
+  <svg viewBox="0 0 720 300" role="img" aria-label="Піраміда тестів: багато unit, менше integration, мало e2e">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <polygon points="300,30 380,30 460,130 220,130" class="red"/>
+    <text x="340" y="90" text-anchor="middle" class="bold">E2E</text>
+    <text x="340" y="110" text-anchor="middle" class="muted">мало · секунди · браузер</text>
+    <polygon points="220,130 460,130 540,210 140,210" class="blue"/>
+    <text x="340" y="165" text-anchor="middle" class="bold">Інтеграційні</text>
+    <text x="340" y="188" text-anchor="middle" class="muted">середньо · сотні мс · API + БД</text>
+    <polygon points="140,210 540,210 620,290 60,290" class="green"/>
+    <text x="340" y="245" text-anchor="middle" class="bold">Модульні (unit)</text>
+    <text x="340" y="270" text-anchor="middle" class="muted">багато · мілісекунди · одна функція</text>
+    <path d="M660 280 L660 40" class="arrow"/>
+    <text x="690" y="160" text-anchor="middle" class="small" transform="rotate(90 690 160)">повільніше, дорожче, реалістичніше</text>
+    <path d="M30 40 L30 280" class="arrow"/>
+    <text x="14" y="160" text-anchor="middle" class="small" transform="rotate(-90 14 160)">більше тестів, швидший зворотний зв'язок</text>
+  </svg>
+  <figcaption>Класична піраміда тестів (Mike Cohn, популяризував Martin Fowler): широка основа з швидких unit-тестів, вузька вершина з повільних e2e.</figcaption>
+</figure>
+
+<p>Класична піраміда каже: пишіть багато швидких unit-тестів, менше інтеграційних і зовсім трохи e2e. Логіка проста: чим вищий рівень, тим повільніший тест і тим важче зрозуміти, що саме зламалося.</p>
+<p>Але Кент Доддс (Kent C. Dodds), автор Testing Library, запропонував альтернативу — «тестовий трофей» (Testing Trophy). Його аргумент: unit-тести дешеві, але часто перевіряють деталі реалізації, а не поведінку. Найбільше впевненості за одиницю зусиль дають інтеграційні тести — коли ви рендерите компонент із реальними дочірніми компонентами і перевіряєте, що користувач бачить. Його девіз: «Write tests. Not too many. Mostly integration.» А в основу трофея він кладе статичний аналіз — TypeScript і ESLint, які ловлять цілий клас помилок без жодного тесту.</p>
+
+<figure>
+  <svg viewBox="0 0 720 300" role="img" aria-label="Тестовий трофей Кента Доддса">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="290" y="20" width="140" height="50" rx="10" class="red"/>
+    <text x="360" y="42" text-anchor="middle" class="bold">E2E</text>
+    <text x="360" y="60" text-anchor="middle" class="muted">кілька ключових сценаріїв</text>
+    <polygon points="190,80 530,80 470,170 250,170" class="blue"/>
+    <text x="360" y="118" text-anchor="middle" class="bold">Інтеграційні</text>
+    <text x="360" y="140" text-anchor="middle" class="muted">найбільша частина: компонент + діти + MSW</text>
+    <rect x="300" y="180" width="120" height="50" rx="10" class="green"/>
+    <text x="360" y="202" text-anchor="middle" class="bold">Unit</text>
+    <text x="360" y="220" text-anchor="middle" class="muted">чисті функції, алгоритми</text>
+    <rect x="200" y="240" width="320" height="50" rx="10" class="purple"/>
+    <text x="360" y="262" text-anchor="middle" class="bold">Статичний аналіз</text>
+    <text x="360" y="280" text-anchor="middle" class="muted">TypeScript · ESLint · Prettier — безкоштовна база</text>
+    <path d="M40 260 L190 260" class="arrow dashed"/>
+    <text x="110" y="248" text-anchor="middle" class="small">ловить помилки типів</text>
+    <path d="M40 120 L185 120" class="arrow dashed"/>
+    <text x="110" y="108" text-anchor="middle" class="small">максимум впевненості</text>
+  </svg>
+  <figcaption>Тестовий трофей: широка «чаша» інтеграційних тестів, тонка ніжка unit-тестів і міцна основа зі статичного аналізу.</figcaption>
+</figure>
+
+<p>Яку модель обрати? Обидві мають рацію — залежить від коду. Для бібліотеки з алгоритмами (парсер, валідатор, розрахунок цін) піраміда працює чудово: чисті функції — багато unit-тестів. Для React-застосунку, де більшість логіки — «клацнув — побачив», ближчий трофей. На практиці здоровий проєкт має і те, і те, а сперечатися про пропорції менш важливо, ніж мати хоч якісь тести.</p>
+
+<h2 id="s3">3. Що таке добрий тест</h2>
+<p>Поганий тест гірший за відсутність тесту: він падає випадково, його ігнорують, а потім вимикають. Добрий тест має чотири властивості.</p>
+<p><strong>Структура AAA — Arrange, Act, Assert</strong> (підготуй, виконай, перевір). Спочатку готуєте дані і залежності, потім викликаєте те, що тестуєте, потім перевіряєте результат. Три чіткі блоки, які читаються зверху вниз як історія.</p>
+<p><strong>Один сценарій на тест.</strong> Тест «додає нотатку, редагує її, видаляє і перевіряє список» — це чотири тести в одному. Коли він упаде, ви не знатимете, який крок винен. Назва тесту повинна читатися як речення: «повертає 404, якщо нотатки не існує».</p>
+<p><strong>Детермінованість.</strong> Тест повинен давати однаковий результат при кожному запуску. Вороги детермінованості: поточна дата (<code>Date.now()</code>), випадкові числа, порядок виконання, мережа, спільний стан між тестами. Все це треба контролювати — фіксувати час через <code>vi.useFakeTimers()</code>, передавати генератор випадкових чисел як залежність, очищати базу між тестами.</p>
+<p><strong>Незалежність.</strong> Тести не мають залежати один від одного. Кожен має проходити сам по собі, у будь-якому порядку, паралельно з іншими.</p>
+
+<pre><code class="language-ts">// Приклад структури AAA
+import { describe, it, expect } from "vitest";
+import { calculateDiscount } from "./pricing.js";
+
+describe("calculateDiscount", () =&gt; {
+  it("дає 10 % знижки для замовлень від 1000 грн", () =&gt; {
+    // Arrange — готуємо вхідні дані
+    const order = { total: 1500, isVip: false };
+
+    // Act — викликаємо функцію
+    const discount = calculateDiscount(order);
+
+    // Assert — перевіряємо результат
+    expect(discount).toBe(150);
+  });
+});</code></pre>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><strong>Тестування реалізації замість поведінки.</strong> Тест «викликає <code>setState</code> двічі» зламається при будь-якому рефакторингу, хоча користувач нічого не помітить. Тестуйте, що видно ззовні: результат функції, HTML на екрані, відповідь API.</li>
+    <li><strong>Логіка в тесті.</strong> Якщо у тесті є <code>if</code>, цикл або обчислення очікуваного значення тією ж формулою, що й у коді, — тест перевіряє сам себе. Очікувані значення пишіть руками: <code>expect(x).toBe(150)</code>, а не <code>expect(x).toBe(order.total * 0.1)</code>.</li>
+    <li><strong>Спільний стан.</strong> Змінна на рівні модуля, яку один тест змінює, а інший читає — класична причина «тести проходять окремо, але падають разом».</li>
+  </ul>
+</div>
+
+<h2 id="s4">4. Vitest: перші unit-тести</h2>
+<p>Vitest — сучасний тестовий фреймворк (test runner), сумісний з API Jest, але побудований на Vite: працює з ES-модулями і TypeScript без налаштувань, стартує за секунду, має режим спостереження (watch mode), який перезапускає лише ті тести, що залежать від зміненого файлу.</p>
+
+<pre><code class="language-bash"># Встановлення
+pnpm add -D vitest
+
+# package.json → "scripts"
+# "test": "vitest run",        — один прогін (для CI)
+# "test:watch": "vitest",      — режим спостереження
+# "test:coverage": "vitest run --coverage"</code></pre>
+
+<pre><code class="language-ts">// src/lib/slugify.ts — чиста функція, ідеальний кандидат на unit-тест
+export function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9а-яіїєґ\s-]/g, "")  // прибрати все зайве
+    .replace(/\s+/g, "-")                 // пробіли → дефіси
+    .replace(/-+/g, "-");                 // кілька дефісів → один
+}</code></pre>
+
+<pre><code class="language-ts">// src/lib/slugify.test.ts — Vitest шукає файли *.test.ts і *.spec.ts
+import { describe, it, expect } from "vitest";
+import { slugify } from "./slugify.js";
+
+describe("slugify", () =&gt; {
+  it("переводить у нижній регістр і замінює пробіли на дефіси", () =&gt; {
+    expect(slugify("Hello World")).toBe("hello-world");
+  });
+
+  it("прибирає зайві пробіли по краях", () =&gt; {
+    expect(slugify("  hello  ")).toBe("hello");
+  });
+
+  it("не залишає подвійних дефісів", () =&gt; {
+    expect(slugify("a   b---c")).toBe("a-b-c");
+  });
+
+  it("повертає порожній рядок для порожнього входу", () =&gt; {
+    expect(slugify("")).toBe("");
+  });
+
+  // it.each — один тест для багатьох наборів даних
+  it.each([
+    ["Привіт світ", "привіт-світ"],
+    ["Café!", "caf"],
+  ])("slugify(%s) → %s", (input, expected) =&gt; {
+    expect(slugify(input)).toBe(expected);
+  });
+});</code></pre>
+
+<p>Основні будівельні блоки:</p>
+<ul>
+  <li><code>describe(назва, fn)</code> — групує тести. Можна вкладати.</li>
+  <li><code>it(назва, fn)</code> або <code>test(...)</code> — один тест. <code>it.skip</code> пропускає, <code>it.only</code> запускає лише його, <code>it.todo</code> — нагадування.</li>
+  <li><code>expect(значення)</code> — точка входу до матчерів (matchers): <code>toBe</code> (строга рівність, як <code>===</code>), <code>toEqual</code> (глибоке порівняння об'єктів), <code>toStrictEqual</code> (ще й <code>undefined</code>-поля враховує), <code>toContain</code>, <code>toMatch(/regex/)</code>, <code>toThrow</code>, <code>toBeNull</code>, <code>toHaveLength</code>, <code>toBeCloseTo</code> для чисел з плаваючою точкою, <code>resolves</code>/<code>rejects</code> для промісів.</li>
+  <li><code>beforeEach</code>/<code>afterEach</code>/<code>beforeAll</code>/<code>afterAll</code> — підготовка і прибирання.</li>
+</ul>
+
+<pre><code class="language-ts">// Асинхронний код і помилки
+import { it, expect } from "vitest";
+import { parseConfig } from "./config.js";
+
+it("кидає помилку, якщо порт не число", () =&gt; {
+  // Функцію треба загорнути у стрілку — інакше помилка вилетить до expect
+  expect(() =&gt; parseConfig({ PORT: "abc" })).toThrow("PORT must be a number");
+});
+
+it("читає конфіг асинхронно", async () =&gt; {
+  await expect(loadConfigFromFile("./test.env")).resolves.toEqual({ port: 3000 });
+});</code></pre>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Створіть порожній проєкт: <code>pnpm init</code>, <code>pnpm add -D vitest typescript</code>, у <code>package.json</code> додайте <code>"type": "module"</code>.</li>
+    <li>Напишіть функцію <code>formatPrice(cents: number, currency: "UAH" | "USD"): string</code>, яка перетворює копійки на рядок виду <code>"1 234,50 ₴"</code>.</li>
+    <li>Напишіть 5 тестів: звичайне число, нуль, від'ємне (має кидати помилку), велике число з роздільниками тисяч, обидві валюти.</li>
+    <li>Запустіть <code>pnpm vitest</code> і навмисно зламайте функцію — подивіться, як виглядає повідомлення про падіння: Vitest показує diff між очікуваним і отриманим.</li>
+  </ol>
+</div>
+
+<h2 id="s5">5. Моки, стаби, фейки, спаї</h2>
+<p>Функція, яка викликає базу даних або зовнішній API, не є чистою. Щоб її протестувати швидко і детерміновано, залежність підміняють на «тестового двійника» (test double). Слово «мок» у побуті вживають для всіх двійників, але Мартін Фаулер у статті «Mocks Aren't Stubs» розрізняє чотири види — і різниця важлива для розуміння, що саме ви перевіряєте.</p>
+
+<figure>
+  <svg viewBox="0 0 720 330" role="img" aria-label="Чотири види тестових двійників: стаб, спай, мок, фейк">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="270" y="20" width="180" height="60" rx="14" class="accent"/>
+    <text x="360" y="45" text-anchor="middle" class="bold">Код під тестом</text>
+    <text x="360" y="66" text-anchor="middle" class="muted">NoteService.create()</text>
+    <path d="M300 80 L110 150" class="arrow"/>
+    <path d="M340 80 L280 150" class="arrow"/>
+    <path d="M380 80 L440 150" class="arrow"/>
+    <path d="M420 80 L610 150" class="arrow"/>
+    <rect x="20" y="150" width="170" height="110" rx="14" class="green"/>
+    <text x="105" y="175" text-anchor="middle" class="bold">Стаб (stub)</text>
+    <text x="105" y="197" text-anchor="middle" class="small">повертає готову</text>
+    <text x="105" y="213" text-anchor="middle" class="small">відповідь, нічого</text>
+    <text x="105" y="229" text-anchor="middle" class="small">не пам'ятає</text>
+    <text x="105" y="250" text-anchor="middle" class="mono">→ { id: 1 }</text>
+    <rect x="200" y="150" width="160" height="110" rx="14" class="blue"/>
+    <text x="280" y="175" text-anchor="middle" class="bold">Спай (spy)</text>
+    <text x="280" y="197" text-anchor="middle" class="small">пропускає виклик</text>
+    <text x="280" y="213" text-anchor="middle" class="small">у справжній код,</text>
+    <text x="280" y="229" text-anchor="middle" class="small">але записує його</text>
+    <text x="280" y="250" text-anchor="middle" class="mono">calls: [[…]]</text>
+    <rect x="370" y="150" width="160" height="110" rx="14" class="red"/>
+    <text x="450" y="175" text-anchor="middle" class="bold">Мок (mock)</text>
+    <text x="450" y="197" text-anchor="middle" class="small">стаб + очікування:</text>
+    <text x="450" y="213" text-anchor="middle" class="small">«мене мали викликати</text>
+    <text x="450" y="229" text-anchor="middle" class="small">один раз з X»</text>
+    <text x="450" y="250" text-anchor="middle" class="mono">toHaveBeenCalledWith</text>
+    <rect x="540" y="150" width="160" height="110" rx="14" class="purple"/>
+    <text x="620" y="175" text-anchor="middle" class="bold">Фейк (fake)</text>
+    <text x="620" y="197" text-anchor="middle" class="small">спрощена робоча</text>
+    <text x="620" y="213" text-anchor="middle" class="small">реалізація, напр.</text>
+    <text x="620" y="229" text-anchor="middle" class="small">репозиторій у Map</text>
+    <text x="620" y="250" text-anchor="middle" class="mono">new Map()</text>
+    <text x="105" y="295" text-anchor="middle" class="muted">перевіряє стан</text>
+    <text x="280" y="295" text-anchor="middle" class="muted">перевіряє стан + виклики</text>
+    <text x="450" y="295" text-anchor="middle" class="muted">перевіряє поведінку</text>
+    <text x="620" y="295" text-anchor="middle" class="muted">перевіряє стан</text>
+  </svg>
+  <figcaption>Стаб дає відповіді; спай підглядає; мок вимагає, щоб його викликали правильно; фейк — це справжня, але спрощена реалізація.</figcaption>
+</figure>
+
+<ul>
+  <li><strong>Стаб (stub)</strong> — заготовлена відповідь. «Коли викличуть <code>findUser(1)</code>, поверни <code>{ name: "Оля" }</code>». Ми не перевіряємо, чи його викликали.</li>
+  <li><strong>Спай (spy)</strong> — обгортка навколо справжньої функції, яка записує виклики. Справжній код виконується, але ми можемо спитати: «скільки разів і з якими аргументами?»</li>
+  <li><strong>Мок (mock)</strong> — стаб, до якого додано очікування щодо взаємодії. Тест проходить, лише якщо мок викликали саме так, як задумано. Це перевірка поведінки (behavior verification), а не стану.</li>
+  <li><strong>Фейк (fake)</strong> — повноцінна, але спрощена реалізація: репозиторій, який зберігає у <code>Map</code> замість Postgres. Він працює по-справжньому, просто не для продакшену.</li>
+</ul>
+
+<pre><code class="language-ts">// notes.service.ts — сервіс залежить від репозиторію і «годинника»
+export interface NoteRepo {
+  insert(data: { title: string; createdAt: Date }): Promise&lt;{ id: number }&gt;;
+}
+
+export function createNoteService(repo: NoteRepo, now: () =&gt; Date = () =&gt; new Date()) {
+  return {
+    async create(title: string) {
+      if (!title.trim()) throw new Error("Title is required");
+      return repo.insert({ title: title.trim(), createdAt: now() });
+    },
+  };
+}</code></pre>
+
+<pre><code class="language-ts">// notes.service.test.ts
+import { describe, it, expect, vi } from "vitest";
+import { createNoteService } from "./notes.service.js";
+
+describe("NoteService.create", () =&gt; {
+  it("обрізає пробіли і передає дату в репозиторій", async () =&gt; {
+    // vi.fn() створює функцію-мок: вона і стаб (mockResolvedValue), і спай (записує виклики)
+    const insert = vi.fn().mockResolvedValue({ id: 42 });
+    const fixedDate = new Date("2026-01-01T10:00:00Z");
+    const service = createNoteService({ insert }, () =&gt; fixedDate);
+
+    const result = await service.create("  Купити молоко  ");
+
+    expect(result).toEqual({ id: 42 });
+    // Перевірка взаємодії — це вже «мок» у термінології Фаулера
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(insert).toHaveBeenCalledWith({ title: "Купити молоко", createdAt: fixedDate });
+  });
+
+  it("кидає помилку на порожній заголовок і не чіпає репозиторій", async () =&gt; {
+    const insert = vi.fn();
+    const service = createNoteService({ insert });
+
+    await expect(service.create("   ")).rejects.toThrow("Title is required");
+    expect(insert).not.toHaveBeenCalled();
+  });
+});</code></pre>
+
+<p>Зверніть увагу: ми не мокали модуль через магію — ми передали залежності через параметри (це називають впровадженням залежностей, dependency injection). Це найчистіший спосіб. Але іноді залежність «зашита» імпортом, і тоді на допомогу приходить <code>vi.mock</code>:</p>
+
+<pre><code class="language-ts">// Підміна цілого модуля — Vitest «підносить» vi.mock над імпортами
+import { it, expect, vi } from "vitest";
+import { sendWelcomeEmail } from "./email.js";
+import { registerUser } from "./register.js";
+
+vi.mock("./email.js", () =&gt; ({
+  sendWelcomeEmail: vi.fn().mockResolvedValue(undefined),
+}));
+
+it("надсилає лист після реєстрації", async () =&gt; {
+  await registerUser({ email: "olya@example.com" });
+  expect(sendWelcomeEmail).toHaveBeenCalledWith("olya@example.com");
+});</code></pre>
+
+<div class="box why">
+  <div class="title">Коли мокати, а коли ні</div>
+  <p><strong>Мокайте те, що не контролюєте або що повільне/недетерміноване:</strong> зовнішні HTTP API (платіжка, погода), поштовий сервіс, час, випадковість, файлову систему в unit-тестах. <strong>Не мокайте свій власний код без потреби:</strong> якщо ви мокаєте модуль <code>utils</code> у тесті модуля <code>service</code>, ви тестуєте, що <code>service</code> викликає <code>utils</code>, а не що він працює. Базу даних у інтеграційних тестах краще не мокати, а піднімати справжню в контейнері — SQL-помилки не ловляться моками.</p>
+</div>
+
+<h2 id="s6">6. Тестування API: supertest і тестова БД</h2>
+<p>Unit-тести не скажуть, чи правильно склеєні маршрути, middleware, валідація і база. Для цього є інтеграційні тести API: ми піднімаємо Express-застосунок у пам'яті, надсилаємо йому HTTP-запити через бібліотеку <strong>supertest</strong> і перевіряємо відповіді.</p>
+
+<pre><code class="language-ts">// src/app.ts — важливо: експортуємо app, а не викликаємо listen() тут
+import express from "express";
+import { notesRouter } from "./notes/router.js";
+
+export function createApp() {
+  const app = express();
+  app.use(express.json());
+  app.use("/api/notes", notesRouter);
+  return app;
+}
+
+// src/server.ts — listen() лише тут, тести його не імпортують
+import { createApp } from "./app.js";
+createApp().listen(3000);</code></pre>
+
+<pre><code class="language-ts">// tests/notes.api.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import request from "supertest";
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { createApp } from "../src/app.js";
+import { db, migrate } from "../src/db.js";
+
+let container: StartedPostgreSqlContainer;
+
+beforeAll(async () =&gt; {
+  // Testcontainers запускає справжній Postgres у Docker спеціально для тестів
+  container = await new PostgreSqlContainer("postgres:16-alpine").start();
+  process.env.DATABASE_URL = container.getConnectionUri();
+  await migrate();               // накочуємо міграції
+}, 60_000);                       // контейнеру потрібен час на старт
+
+afterAll(async () =&gt; {
+  await container.stop();
+});
+
+beforeEach(async () =&gt; {
+  // Очищення між тестами: кожен тест починає з порожньої таблиці
+  await db.execute("TRUNCATE notes RESTART IDENTITY CASCADE");
+});
+
+describe("POST /api/notes", () =&gt; {
+  it("створює нотатку і повертає 201 з id", async () =&gt; {
+    const res = await request(createApp())
+      .post("/api/notes")
+      .send({ title: "Перша", body: "Текст" })
+      .expect(201)
+      .expect("Content-Type", /json/);
+
+    expect(res.body).toMatchObject({ id: 1, title: "Перша" });
+  });
+
+  it("повертає 400 на порожній заголовок", async () =&gt; {
+    const res = await request(createApp()).post("/api/notes").send({ title: "" });
+    expect(res.status).toBe(400);
+    expect(res.body.errors[0].field).toBe("title");
+  });
+});
+
+describe("GET /api/notes/:id", () =&gt; {
+  it("повертає 404, якщо нотатки немає", async () =&gt; {
+    await request(createApp()).get("/api/notes/999").expect(404);
+  });
+});</code></pre>
+
+<p>Два підходи до тестової бази даних:</p>
+<ul>
+  <li><strong>Testcontainers</strong> — бібліотека, яка програмно запускає Docker-контейнер з Postgres на випадковому порту, а після тестів зупиняє. Плюс: ізоляція, нічого не треба ставити руками, працює в CI. Мінус: потрібен Docker, старт займає 2–5 секунд.</li>
+  <li><strong>Docker Compose з тестовим сервісом</strong> — у <code>compose.yaml</code> окремий сервіс <code>db-test</code> на порту 5433, тести підключаються до нього. Простіше, але треба не забути його запустити.</li>
+</ul>
+<p>Очищення між тестами — обов'язкове. Варіанти: <code>TRUNCATE</code> усіх таблиць у <code>beforeEach</code> (просто і надійно), обгортання кожного тесту в транзакцію з відкатом (швидше, але складніше з пулами з'єднань), або окрема схема для кожного файлу тестів (для паралельного запуску).</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><strong>Паралельність.</strong> Vitest за замовчуванням запускає файли тестів паралельно. Два файли, які чистять одну таблицю, будуть заважати один одному. Або запускайте API-тести з <code>--no-file-parallelism</code>, або давайте кожному файлу свою схему/базу.</li>
+    <li><strong>Незакриті з'єднання.</strong> Якщо пул з'єднань не закрити в <code>afterAll</code>, Vitest «висне» після тестів.</li>
+    <li><strong>Тести проти продакшн-бази.</strong> <code>TRUNCATE</code> у <code>beforeEach</code> + випадково підхоплений <code>.env</code> з продакшн-URL = катастрофа. Перевіряйте, що <code>DATABASE_URL</code> містить слово <code>test</code> або локальний хост, і падайте, якщо ні.</li>
+  </ul>
+</div>
+
+<h2 id="s7">7. Тестування React: Testing Library і MSW</h2>
+<p>Testing Library — це набір утиліт для тестування UI, побудований навколо одного принципу: «Чим більше тести схожі на те, як ваш застосунок використовують, тим більше впевненості вони дають». Тому ви не шукаєте елементи за CSS-класами чи внутрішнім станом — ви шукаєте кнопку з текстом «Зберегти», як це робить користувач, і клацаєте її.</p>
+
+<pre><code class="language-bash">pnpm add -D @testing-library/react @testing-library/user-event @testing-library/jest-dom jsdom msw</code></pre>
+
+<pre><code class="language-ts">// vitest.config.ts
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: "jsdom",               // емуляція DOM у Node
+    setupFiles: ["./tests/setup.ts"],   // jest-dom матчери + MSW-сервер
+    globals: false,
+  },
+});</code></pre>
+
+<pre><code class="language-tsx">// src/features/notes/NoteForm.tsx
+import { useState } from "react";
+
+export function NoteForm({ onCreated }: { onCreated: (id: number) =&gt; void }) {
+  const [title, setTitle] = useState("");
+  const [error, setError] = useState&lt;string | null&gt;(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const res = await fetch("/api/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) { setError("Не вдалося зберегти"); return; }
+    const { id } = await res.json();
+    onCreated(id);
+  }
+
+  return (
+    &lt;form onSubmit={submit}&gt;
+      &lt;label htmlFor="title"&gt;Заголовок&lt;/label&gt;
+      &lt;input id="title" value={title} onChange={(e) =&gt; setTitle(e.target.value)} /&gt;
+      &lt;button type="submit"&gt;Зберегти&lt;/button&gt;
+      {error &amp;&amp; &lt;p role="alert"&gt;{error}&lt;/p&gt;}
+    &lt;/form&gt;
+  );
+}</code></pre>
+
+<pre><code class="language-tsx">// src/features/notes/NoteForm.test.tsx
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
+import { server } from "../../../tests/msw-server.js";
+import { NoteForm } from "./NoteForm.js";
+
+describe("NoteForm", () =&gt; {
+  it("надсилає заголовок і викликає onCreated з id", async () =&gt; {
+    const user = userEvent.setup();
+    const onCreated = vi.fn();
+    render(&lt;NoteForm onCreated={onCreated} /&gt;);
+
+    // Шукаємо елементи так, як їх бачить користувач (і скрінрідер)
+    await user.type(screen.getByLabelText("Заголовок"), "Купити хліб");
+    await user.click(screen.getByRole("button", { name: "Зберегти" }));
+
+    // findBy* чекає до 1 с, поки елемент/умова з'явиться
+    await vi.waitFor(() =&gt; expect(onCreated).toHaveBeenCalledWith(1));
+  });
+
+  it("показує помилку, якщо сервер відповів 500", async () =&gt; {
+    // Перевизначаємо обробник лише для цього тесту
+    server.use(http.post("/api/notes", () =&gt; HttpResponse.json({}, { status: 500 })));
+    const user = userEvent.setup();
+    render(&lt;NoteForm onCreated={vi.fn()} /&gt;);
+
+    await user.type(screen.getByLabelText("Заголовок"), "x");
+    await user.click(screen.getByRole("button", { name: "Зберегти" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не вдалося зберегти");
+  });
+});</code></pre>
+
+<pre><code class="language-ts">// tests/msw-server.ts — MSW (Mock Service Worker) перехоплює fetch на рівні мережі
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+
+export const handlers = [
+  http.post("/api/notes", async ({ request }) =&gt; {
+    const body = (await request.json()) as { title: string };
+    if (!body.title) return HttpResponse.json({ error: "empty" }, { status: 400 });
+    return HttpResponse.json({ id: 1, title: body.title }, { status: 201 });
+  }),
+];
+
+export const server = setupServer(...handlers);
+
+// tests/setup.ts
+import "@testing-library/jest-dom/vitest";
+import { beforeAll, afterEach, afterAll } from "vitest";
+import { server } from "./msw-server.js";
+
+beforeAll(() =&gt; server.listen({ onUnhandledRequest: "error" })); // невідомий запит = помилка
+afterEach(() =&gt; server.resetHandlers());                          // скидаємо server.use()
+afterAll(() =&gt; server.close());</code></pre>
+
+<figure>
+  <svg viewBox="0 0 720 260" role="img" aria-label="MSW перехоплює запит fetch до того, як він піде в мережу">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="80" width="170" height="80" rx="14" class="blue"/>
+    <text x="105" y="112" text-anchor="middle" class="bold">Компонент</text>
+    <text x="105" y="135" text-anchor="middle" class="mono">fetch("/api/notes")</text>
+    <path d="M190 120 L280 120" class="arrow"/>
+    <rect x="280" y="60" width="180" height="120" rx="14" class="purple"/>
+    <text x="370" y="90" text-anchor="middle" class="bold">MSW</text>
+    <text x="370" y="112" text-anchor="middle" class="small">перехоплює на рівні</text>
+    <text x="370" y="128" text-anchor="middle" class="small">http/fetch у Node</text>
+    <text x="370" y="150" text-anchor="middle" class="small">шукає handler за</text>
+    <text x="370" y="166" text-anchor="middle" class="small">методом і шляхом</text>
+    <path d="M460 100 L560 60" class="arrow"/>
+    <rect x="560" y="30" width="140" height="60" rx="14" class="green"/>
+    <text x="630" y="55" text-anchor="middle" class="bold">Handler є</text>
+    <text x="630" y="76" text-anchor="middle" class="mono">→ 201 { id: 1 }</text>
+    <path d="M460 145 L560 185" class="arrow dashed"/>
+    <rect x="560" y="160" width="140" height="60" rx="14" class="red"/>
+    <text x="630" y="185" text-anchor="middle" class="bold">Handler немає</text>
+    <text x="630" y="206" text-anchor="middle" class="small">onUnhandledRequest: error</text>
+    <path d="M280 200 L105 200 L105 160" class="arrow dashed"/>
+    <text x="200" y="230" text-anchor="middle" class="muted">відповідь повертається у fetch, компонент нічого не знає про підміну</text>
+    <line x1="470" y1="240" x2="700" y2="240" class="arrow" style="opacity:.25"/>
+    <text x="585" y="256" text-anchor="middle" class="muted">справжня мережа — ніколи не викликається</text>
+  </svg>
+  <figcaption>MSW підміняє відповіді на рівні мережевого шару, тому компонент використовує звичайний fetch — жодних моків у самому коді.</figcaption>
+</figure>
+
+<p>Чому MSW кращий за <code>vi.mock("fetch")</code>? Бо компонент залишається незмінним: ви тестуєте справжній <code>fetch</code>, справжню серіалізацію JSON, справжню обробку статусів. Ті самі обробники можна використовувати в браузері під час розробки (через Service Worker) і в Storybook.</p>
+
+<p>Пріоритет селекторів у Testing Library (від найкращого до найгіршого): <code>getByRole</code> (кнопка, посилання, поле — з ім'ям), <code>getByLabelText</code> (поля форм), <code>getByPlaceholderText</code>, <code>getByText</code>, <code>getByDisplayValue</code>, <code>getByAltText</code>, <code>getByTitle</code>, і лише в крайньому разі — <code>getByTestId</code>. Якщо елемент неможливо знайти за роллю, це часто означає, що він недоступний для скрінрідерів — тест підказує проблему доступності.</p>
+
+<h2 id="s8">8. E2E: Playwright</h2>
+<p>Наскрізний тест запускає справжній браузер (Chromium, Firefox, WebKit), відкриває ваш застосунок і робить те, що робив би користувач. Playwright від Microsoft — сучасний стандарт: автоматичне очікування елементів (не треба <code>sleep(1000)</code>), ізольовані контексти браузера для кожного тесту, паралельний запуск, запис трасування (trace) з відео, скріншотами і мережею.</p>
+
+<pre><code class="language-bash">pnpm create playwright   # створить playwright.config.ts, tests/, встановить браузери</code></pre>
+
+<pre><code class="language-ts">// playwright.config.ts
+import { defineConfig, devices } from "@playwright/test";
+
+export default defineConfig({
+  testDir: "./e2e",
+  fullyParallel: true,
+  retries: process.env.CI ? 2 : 0,          // у CI дозволяємо 2 повтори
+  use: {
+    baseURL: "http://localhost:3000",
+    trace: "on-first-retry",                 // trace тільки коли тест впав і перезапустився
+  },
+  webServer: {
+    command: "pnpm dev",                     // Playwright сам підніме застосунок
+    url: "http://localhost:3000",
+    reuseExistingServer: !process.env.CI,
+  },
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "mobile", use: { ...devices["Pixel 7"] } },
+  ],
+});</code></pre>
+
+<pre><code class="language-ts">// e2e/login.spec.ts
+import { test, expect } from "@playwright/test";
+
+test.describe("Вхід у систему", () =&gt; {
+  test("користувач входить і бачить свої нотатки", async ({ page }) =&gt; {
+    await page.goto("/login");
+
+    // Селектори за ролями — стійкі до змін CSS і структури
+    await page.getByLabel("Email").fill("olya@example.com");
+    await page.getByLabel("Пароль").fill("correct-horse-battery");
+    await page.getByRole("button", { name: "Увійти" }).click();
+
+    // expect автоматично чекає до 5 с, поки умова стане true
+    await expect(page).toHaveURL("/notes");
+    await expect(page.getByRole("heading", { name: "Мої нотатки" })).toBeVisible();
+  });
+
+  test("показує помилку при неправильному паролі", async ({ page }) =&gt; {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("olya@example.com");
+    await page.getByLabel("Пароль").fill("wrong");
+    await page.getByRole("button", { name: "Увійти" }).click();
+
+    await expect(page.getByRole("alert")).toHaveText(/невірний email або пароль/i);
+    await expect(page).toHaveURL("/login");   // залишились на сторінці входу
+  });
+});</code></pre>
+
+<pre><code class="language-bash">pnpm playwright test                 # запуск усіх e2e
+pnpm playwright test --ui            # інтерактивний режим з таймлайном
+pnpm playwright test --debug         # покроково з інспектором
+pnpm playwright show-trace trace.zip # trace viewer: DOM-знімки, мережа, консоль для кожного кроку</code></pre>
+
+<p>Trace viewer — головна зброя проти «впало в CI, а локально працює». Він показує для кожної дії знімок DOM до і після, мережеві запити, консоль браузера і скріншот. Ви буквально «перемотуєте» тест і бачите, чому кнопка не знайшлася.</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Логін в кожному e2e-тесті — повільно. Playwright дозволяє один раз залогінитися у <code>globalSetup</code>, зберегти стан браузера (cookies + localStorage) через <code>page.context().storageState({ path: "auth.json" })</code> і використовувати його в усіх тестах через <code>use: { storageState: "auth.json" }</code>. Також корисно: <code>page.route()</code> для підміни зовнішніх API прямо в браузері, <code>test.fixme()</code> для відомих багів і візуальні регресії через <code>expect(page).toHaveScreenshot()</code>.</p>
+</div>
+
+<h2 id="s9">9. TDD: червоний — зелений — рефакторинг</h2>
+<p>Розробка через тестування (Test-Driven Development, TDD) перевертає звичний порядок: спершу тест, потім код. Цикл складається з трьох кроків, які повторюються кожні кілька хвилин.</p>
+
+<figure>
+  <svg viewBox="0 0 720 280" role="img" aria-label="Цикл TDD: червоний, зелений, рефакторинг">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <circle cx="140" cy="140" r="70" class="red"/>
+    <text x="140" y="130" text-anchor="middle" class="bold">1. Червоний</text>
+    <text x="140" y="152" text-anchor="middle" class="small">напиши тест,</text>
+    <text x="140" y="168" text-anchor="middle" class="small">який падає</text>
+    <path d="M215 120 L285 120" class="arrow"/>
+    <text x="250" y="108" text-anchor="middle" class="muted">мінімум коду</text>
+    <circle cx="360" cy="140" r="70" class="green"/>
+    <text x="360" y="130" text-anchor="middle" class="bold">2. Зелений</text>
+    <text x="360" y="152" text-anchor="middle" class="small">зроби, щоб тест</text>
+    <text x="360" y="168" text-anchor="middle" class="small">пройшов</text>
+    <path d="M435 120 L505 120" class="arrow"/>
+    <text x="470" y="108" text-anchor="middle" class="muted">не змінюючи поведінки</text>
+    <circle cx="580" cy="140" r="70" class="blue"/>
+    <text x="580" y="130" text-anchor="middle" class="bold">3. Рефакторинг</text>
+    <text x="580" y="152" text-anchor="middle" class="small">покращ код,</text>
+    <text x="580" y="168" text-anchor="middle" class="small">тести зелені</text>
+    <path d="M560 212 Q360 290 160 212" class="arrow"/>
+    <text x="360" y="262" text-anchor="middle" class="muted">наступний тест → наступна маленька поведінка</text>
+    <text x="360" y="30" text-anchor="middle" class="bold">Один цикл = 2–10 хвилин</text>
+  </svg>
+  <figcaption>TDD: тест падає (доводить, що перевіряє щось реальне) → мінімальний код робить його зеленим → рефакторинг під захистом тестів.</figcaption>
+</figure>
+
+<ol>
+  <li><strong>Червоний (red).</strong> Напишіть тест для маленького шматочка поведінки, якої ще немає. Запустіть — він має впасти. Якщо він пройшов одразу, тест нічого не перевіряє.</li>
+  <li><strong>Зелений (green).</strong> Напишіть найпростіший код, який робить тест зеленим. Навіть якщо це <code>return 150</code>. Мета — не «правильно», а «швидко зелений».</li>
+  <li><strong>Рефакторинг (refactor).</strong> Тепер, коли тест захищає поведінку, приберіть дублювання, дайте гарні імена, узагальніть. Тести мають залишатися зеленими після кожної правки.</li>
+</ol>
+
+<p>Коли TDD реально допомагає: коли ви добре розумієте, <em>що</em> має робити код, але не <em>як</em> — алгоритми, парсери, бізнес-правила зі складними умовами (розрахунок знижок, валідація), виправлення багів (спершу тест, який відтворює баг, потім фікс). Коли не допомагає: при дослідженні незнайомої бібліотеки, при верстці UI, на етапі прототипу, коли вимоги змінюються щогодини. TDD — інструмент, а не релігія.</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам: TDD на задачі «FizzBuzz для нотаток»</div>
+  <ol>
+    <li>Функція <code>tagsFor(note)</code> має повертати масив тегів: якщо заголовок містить «купити» — тег <code>"shopping"</code>; якщо довжина тексту понад 500 символів — <code>"long"</code>; якщо нотатка створена у вихідний — <code>"weekend"</code>.</li>
+    <li>Напишіть перший тест: порожня нотатка → <code>[]</code>. Запустіть — впаде (функції немає). Створіть функцію, яка повертає <code>[]</code>. Зелений.</li>
+    <li>Другий тест: «Купити хліб» → <code>["shopping"]</code>. Червоний. Додайте одну умову. Зелений.</li>
+    <li>Продовжуйте по одному правилу. Наприкінці — рефакторинг: винесіть правила у масив <code>{ test, tag }</code> і пройдіться по ньому.</li>
+    <li>Зверніть увагу, як тест для «вихідного» змусить вас передавати дату як параметр, а не викликати <code>new Date()</code> усередині.</li>
+  </ol>
+</div>
+
+<h2 id="s10">10. Покриття, flaky-тести і CI</h2>
+<h3>Покриття коду</h3>
+<p>Покриття (code coverage) — це відсоток рядків, гілок, функцій, які виконалися під час тестів. Vitest збирає його через <code>@vitest/coverage-v8</code>: <code>pnpm vitest run --coverage</code> дає таблицю і HTML-звіт, де незачеплені рядки підсвічені червоним.</p>
+<p>Що покриття означає: «цей код <em>виконався</em> під час тестів». Чого воно не означає: «цей код <em>перевірений</em>». Тест без жодного <code>expect</code> дасть 100 % покриття і нульову користь. Тому 100 % — не мета. Розумна мета: висока для критичної бізнес-логіки (розрахунки, авторизація, гроші), помірна для всього іншого, і головне — дивитися на червоні рядки як на підказку «а це я взагалі перевіряв?», а не як на цифру для звіту. Багато команд ставлять поріг (наприклад, 80 %) у CI лише для того, щоб покриття не падало з часом.</p>
+
+<pre><code class="language-ts">// vitest.config.ts — поріг покриття
+export default defineConfig({
+  test: {
+    coverage: {
+      provider: "v8",
+      include: ["src/**"],
+      exclude: ["src/**/*.test.ts", "src/server.ts"],
+      thresholds: { lines: 80, branches: 70 },   // CI впаде, якщо менше
+    },
+  },
+});</code></pre>
+
+<h3>Flaky-тести</h3>
+<p>«Нестабільний» (flaky) тест — той, що іноді проходить, а іноді падає без змін у коді. Це найшкідливіший вид тесту: команда перестає довіряти червоному CI і починає клацати «перезапустити», поки не позеленіє. Типові причини і ліки:</p>
+<div class="table-wrap">
+<table>
+  <tr><th>Причина</th><th>Симптом</th><th>Лікування</th></tr>
+  <tr><td>Гонка (race): тест перевіряє до того, як асинхронна дія завершилась</td><td>падає під навантаженням CI</td><td><code>findBy*</code>/<code>waitFor</code> замість <code>getBy*</code> одразу після дії; у Playwright — <code>expect(...).toBeVisible()</code> замість перевірки без очікування</td></tr>
+  <tr><td>Спільний стан між тестами</td><td>падає лише при певному порядку</td><td>очищати БД/моки в <code>beforeEach</code>, не використовувати глобальні змінні</td></tr>
+  <tr><td>Залежність від часу/часового поясу</td><td>падає вночі або в CI в іншому регіоні</td><td><code>vi.useFakeTimers()</code>, <code>vi.setSystemTime()</code>, <code>TZ=UTC</code> у CI</td></tr>
+  <tr><td>Реальна мережа</td><td>падає при недоступності стороннього сервісу</td><td>MSW / testcontainers, <code>onUnhandledRequest: "error"</code></td></tr>
+  <tr><td>Фіксовані затримки <code>sleep(500)</code></td><td>працює локально, повільний CI не встигає</td><td>чекати на умову, а не час</td></tr>
+  <tr><td>Випадкові дані без seed</td><td>падає раз на 50 запусків</td><td>фіксований seed (<code>faker.seed(42)</code>) або детерміновані фікстури</td></tr>
+</table>
+</div>
+<p>Політика щодо flaky-тестів: не ігнорувати. Або лікувати одразу, або тимчасово карантинувати з тікетом (<code>it.skip</code> + посилання на issue) — але не залишати «іноді червоним».</p>
+
+<h3>Тести в CI</h3>
+<p>Тести, які запускають лише локально, — це тести, які хтось забуде запустити. У безперервній інтеграції (continuous integration, CI) вони запускаються автоматично на кожен push і pull request:</p>
+
+<pre><code class="language-yaml"># .github/workflows/test.yml
+name: Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-and-api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:                       # альтернатива testcontainers: GitHub підніме Postgres поруч
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: test, POSTGRES_DB: notes_test }
+        ports: ["5432:5432"]
+        options: &gt;-
+          --health-cmd "pg_isready" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tsc --noEmit                       # статичний аналіз — основа трофея
+      - run: pnpm lint
+      - run: pnpm vitest run --coverage
+        env:
+          DATABASE_URL: postgres://postgres:test@localhost:5432/notes_test
+          TZ: UTC
+      - uses: actions/upload-artifact@v4             # зберігаємо HTML-звіт покриття
+        if: always()
+        with: { name: coverage, path: coverage/ }
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: unit-and-api                              # e2e лише якщо швидкі тести пройшли
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm playwright install --with-deps chromium
+      - run: pnpm playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()                                # trace лише коли впало
+        with: { name: playwright-traces, path: test-results/ }</code></pre>
+
+<div class="box why">
+  <div class="title">Чому e2e окремою джобою</div>
+  <p>E2E повільні і крихкіші. Якщо запускати їх у тій самій джобі, що й unit-тести, розробник чекатиме 5 хвилин, щоб дізнатися про помилку типу, яку <code>tsc</code> знайшов би за 10 секунд. Порядок «швидке спершу, повільне потім» дає зворотний зв'язок якнайшвидше і економить хвилини CI. Це той самий принцип, що й у піраміді.</p>
+</div>
+
+<h2 id="s11">11. Практика: тести для API нотаток</h2>
+<p>У розділі 04 ви побудували REST API для нотаток на Express: <code>GET /api/notes</code>, <code>GET /api/notes/:id</code>, <code>POST /api/notes</code>, <code>PATCH /api/notes/:id</code>, <code>DELETE /api/notes/:id</code>. Час покрити його тестами по всіх рівнях.</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам: повне покриття API нотаток</div>
+  <ol>
+    <li><strong>Підготовка.</strong> Розділіть <code>app.ts</code> (створює Express) і <code>server.ts</code> (викликає <code>listen</code>). Винесіть валідацію тіла запиту у чисту функцію <code>validateNote(input)</code>, яка повертає <code>{ ok: true, data }</code> або <code>{ ok: false, errors }</code>.</li>
+    <li><strong>Unit (Vitest).</strong> Напишіть 6+ тестів для <code>validateNote</code>: порожній заголовок, заголовок понад 200 символів, зайві поля, нормальні дані, <code>body</code> необов'язковий, обрізання пробілів.</li>
+    <li><strong>Інтеграція (supertest + testcontainers).</strong> Для кожного ендпоінта — щасливий шлях і хоча б одна помилка: 201 при створенні; 400 при невалідних даних; 200 зі списком (перевірте порядок за датою); 404 для неіснуючого id; 204 при видаленні і 404 при повторному видаленні; PATCH оновлює лише передані поля.</li>
+    <li><strong>Фронтенд (Testing Library + MSW).</strong> Компонент <code>NotesList</code>: показує «Немає нотаток» на порожній список; показує заголовки; кнопка «Видалити» надсилає DELETE і прибирає елемент зі списку; при помилці сервера показує <code>role="alert"</code>.</li>
+    <li><strong>E2E (Playwright).</strong> Один сценарій: відкрити сторінку → створити нотатку через форму → побачити її у списку → перезавантажити сторінку → вона досі там → видалити.</li>
+    <li><strong>CI.</strong> Додайте workflow вище, зробіть pull request і переконайтеся, що всі джоби зелені. Потім навмисно зламайте валідацію і побачте червоний PR.</li>
+    <li><strong>Покриття.</strong> Подивіться звіт. Знайдіть хоча б один незачеплений рядок і вирішіть: це потребує тесту чи це мертвий код?</li>
+  </ol>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим інтеграційний тест відрізняється від модульного?</summary><p>Модульний перевіряє одну функцію/клас ізольовано, підміняючи залежності. Інтеграційний перевіряє взаємодію кількох частин разом — наприклад, маршрут Express + сервіс + справжня база даних, або React-компонент з дочірніми компонентами і мережею через MSW.</p></details>
+  <details><summary>2. Що таке AAA і навіщо ця структура?</summary><p>Arrange (підготувати дані), Act (виконати дію), Assert (перевірити результат). Три чіткі блоки роблять тест читабельним як історію і не дають змішувати кілька сценаріїв в одному тесті.</p></details>
+  <details><summary>3. У чому різниця між стабом і моком за Фаулером?</summary><p>Стаб просто повертає заготовлену відповідь — тест перевіряє кінцевий стан. Мок додає очікування щодо взаємодії: тест проходить лише якщо мок викликали певним чином (<code>toHaveBeenCalledWith</code>) — це перевірка поведінки.</p></details>
+  <details><summary>4. Чому Testing Library радить шукати елементи за роллю, а не за CSS-класом?</summary><p>Бо користувач (і скрінрідер) бачить кнопку «Зберегти», а не <code>.btn-primary</code>. Тести за ролями не ламаються при зміні стилів і водночас перевіряють доступність: якщо елемент не знайти за роллю, він, ймовірно, недоступний.</p></details>
+  <details><summary>5. Чи означає 100 % покриття, що код без помилок?</summary><p>Ні. Покриття показує, що рядок виконався під час тестів, а не що результат перевірили. Тест без <code>expect</code> дає покриття, але не дає упевненості. Покриття — підказка, де тестів не вистачає, а не мета.</p></details>
+  <details><summary>6. Що робити з flaky-тестом?</summary><p>Не ігнорувати і не перезапускати «поки не позеленіє». Знайти причину (гонка, спільний стан, час, мережа, фіксовані затримки) і полікувати. Якщо не одразу — карантин через <code>it.skip</code> з тікетом, щоб не підривати довіру до CI.</p></details>
+  <details><summary>7. Навіщо MSW, якщо можна замокати fetch?</summary><p>MSW перехоплює запити на рівні мережі, тому код компонента залишається незмінним і виконує справжній <code>fetch</code>, справжній JSON-парсинг і обробку статусів. Ті самі обробники працюють у тестах, у браузері під час розробки і в Storybook.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>Тести дають впевненість при змінах, служать чесною документацією і покращують дизайн коду.</li>
+  <li>Unit — швидкі й ізольовані, integration — реальні зв'язки між частинами, e2e — справжній браузер. Піраміда і трофей — дві моделі пропорцій; головне — мати всі рівні.</li>
+  <li>Добрий тест: AAA, один сценарій, детермінований, незалежний, перевіряє поведінку, а не реалізацію.</li>
+  <li>Vitest: <code>describe/it/expect</code>, матчери, <code>vi.fn()</code> для моків, <code>vi.mock()</code> для модулів, <code>vi.useFakeTimers()</code> для часу.</li>
+  <li>Мокайте зовнішнє і недетерміноване; не мокайте свою базу в інтеграційних тестах — використовуйте testcontainers і чистіть між тестами.</li>
+  <li>Testing Library: тестуйте як користувач, шукайте за роллю, використовуйте <code>user-event</code> і MSW для мережі.</li>
+  <li>Playwright: селектори за ролями, автоочікування, trace viewer для діагностики, <code>storageState</code> для логіну.</li>
+  <li>TDD: червоний → зелений → рефакторинг; допомагає для бізнес-логіки й багів, не обов'язковий для UI і прототипів.</li>
+  <li>Покриття — підказка, не мета; flaky-тести лікують, а не перезапускають; тести живуть у CI з порядком «швидке спершу».</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://vitest.dev/guide/" target="_blank" rel="noopener">Vitest Guide</a> — офіційна документація: конфігурація, матчери, моки, покриття, режим браузера.</li>
+    <li><a href="https://vitest.dev/api/vi.html" target="_blank" rel="noopener">Vitest: vi API</a> — довідник по <code>vi.fn</code>, <code>vi.mock</code>, <code>vi.spyOn</code>, <code>vi.useFakeTimers</code>.</li>
+    <li><a href="https://testing-library.com/docs/guiding-principles/" target="_blank" rel="noopener">Testing Library: Guiding Principles</a> — філософія «тестуй як користувач» на одній сторінці.</li>
+    <li><a href="https://testing-library.com/docs/queries/about/#priority" target="_blank" rel="noopener">Testing Library: пріоритет селекторів</a> — чому <code>getByRole</code> перший, а <code>getByTestId</code> останній.</li>
+    <li><a href="https://playwright.dev/docs/intro" target="_blank" rel="noopener">Playwright: Getting Started</a> — установка, перший тест, локатори, trace viewer.</li>
+    <li><a href="https://playwright.dev/docs/best-practices" target="_blank" rel="noopener">Playwright: Best Practices</a> — як писати стійкі e2e: ізоляція, локатори за ролями, web-first assertions.</li>
+    <li><a href="https://mswjs.io/docs/" target="_blank" rel="noopener">MSW Documentation</a> — мокування мережі для Node і браузера, інтеграція з Vitest.</li>
+    <li><a href="https://kentcdodds.com/blog/write-tests" target="_blank" rel="noopener">Kent C. Dodds: «Write tests. Not too many. Mostly integration.»</a> — коротке есе, з якого виріс тестовий трофей.</li>
+    <li><a href="https://kentcdodds.com/blog/the-testing-trophy-and-testing-classifications" target="_blank" rel="noopener">Kent C. Dodds: The Testing Trophy</a> — детальне пояснення рівнів і чому статичний аналіз в основі.</li>
+    <li><a href="https://martinfowler.com/bliki/TestPyramid.html" target="_blank" rel="noopener">Martin Fowler: Test Pyramid</a> — класична модель і її обмеження.</li>
+    <li><a href="https://martinfowler.com/articles/mocksArentStubs.html" target="_blank" rel="noopener">Martin Fowler: Mocks Aren't Stubs</a> — стаб, мок, фейк, спай і два стилі тестування (класичний vs мокістський).</li>
+    <li><a href="https://testcontainers.com/guides/getting-started-with-testcontainers-for-nodejs/" target="_blank" rel="noopener">Testcontainers for Node.js</a> — як піднімати Postgres/Redis у Docker для тестів.</li>
+    <li><a href="https://github.com/ladjs/supertest" target="_blank" rel="noopener">supertest на GitHub</a> — README з усіма прикладами HTTP-асертів.</li>
+    <li><a href="https://testing.googleblog.com/2015/04/just-say-no-to-more-end-to-end-tests.html" target="_blank" rel="noopener">Google Testing Blog: Just Say No to More End-to-End Tests</a> — чому забагато e2e — це погано, з досвіду Google.</li>
+    <li><a href="https://testing.googleblog.com/2016/05/flaky-tests-at-google-and-how-we.html" target="_blank" rel="noopener">Google Testing Blog: Flaky Tests at Google</a> — як великі компанії живуть із нестабільними тестами.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 10</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

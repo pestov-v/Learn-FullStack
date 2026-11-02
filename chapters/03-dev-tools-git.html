@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03. Інструменти: термінал, Git, npm — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 03 · <span class="level-badge level-1">Новачок</span></div>
+  <h1>Інструменти: термінал, Git, npm</h1>
+  <p class="lead">Після цього розділу ви впевнено працюватимете в терміналі, керуватимете залежностями через npm, зберігатимете історію коду в Git і зрозумієте, навіщо команди використовують TypeScript, ESLint і Prettier.</p>
+  <div class="meta"><span>⏱ ~90 хв</span><span>📚 Передумови: розділи 01–02</span><span>🎯 Ціль: налаштоване робоче місце і перший репозиторій на GitHub</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Термінал: розмова з комп'ютером текстом</a></li>
+    <li><a href="#s2">Редактор: VS Code</a></li>
+    <li><a href="#s3">Node.js, npm, pnpm і package.json</a></li>
+    <li><a href="#s4">Git: машина часу для коду</a></li>
+    <li><a href="#s5">Гілки, merge і rebase</a></li>
+    <li><a href="#s6">GitHub, pull request і командний потік</a></li>
+    <li><a href="#s7">Секрети, .env і .gitignore</a></li>
+    <li><a href="#s8">Лінтери, форматери і TypeScript</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви, що ти будуєш замок із LEGO. <strong>Термінал</strong> — це коли замість того, щоб тицяти пальцем у деталі, ти кажеш помічнику словами: «дай червону цеглинку», «покажи, що в коробці». Спочатку незвично, але потім швидше, ніж мишкою. <strong>npm</strong> — це магазин готових наборів LEGO: замість того щоб ліпити колесо самому, береш готове. <strong>Git</strong> — це чарівний фотоапарат: після кожного кроку ти робиш знімок замку, і якщо щось зламав — можна повернутись до будь-якого знімка. А ще можна будувати замок удвох, кожен свою вежу, і потім з'єднати. <strong>GitHub</strong> — це полиця в інтернеті, куди ви обоє кладете свої знімки.</p>
+</div>
+
+<h2 id="s1">1. Термінал: розмова з комп'ютером текстом</h2>
+<p><strong>Термінал (terminal)</strong> — це вікно, в яке ви пишете команди, а комп'ютер відповідає текстом. Програма, яка розуміє команди, називається <strong>оболонкою (shell)</strong>: на macOS і Linux це зазвичай <code>zsh</code> або <code>bash</code>, на Windows — PowerShell, а краще встановити WSL (Windows Subsystem for Linux) або Git Bash, щоб команди збігались із рештою світу.</p>
+<p>Навіщо це, якщо є мишка? Бо всі інструменти розробника — npm, git, docker, компілятори — живуть у терміналі. Мишкою не запустиш тести і не задеплоїш сервер. А ще команди можна записати у файл і повторювати автоматично.</p>
+<p>Термінал завжди «стоїть» у якійсь теці — це <strong>поточна директорія (working directory)</strong>. Більшість команд працюють відносно неї:</p>
+<pre><code class="language-bash">pwd                     # де я? (print working directory) → /Users/you/projects
+ls                      # що тут лежить? (list)
+ls -la                  # детально, включно з прихованими файлами (починаються з крапки)
+cd projects             # зайти в теку (change directory)
+cd ..                   # на рівень вище
+cd ~                    # у домашню теку
+cd -                    # туди, де був до цього
+
+mkdir my-app            # створити теку
+touch index.html        # створити порожній файл
+cat package.json        # показати вміст файлу
+head -n 20 app.log      # перші 20 рядків
+tail -f app.log         # «стежити» за файлом — нові рядки з'являються живцем
+cp a.txt b.txt          # скопіювати
+mv old.txt new.txt      # перейменувати або перемістити
+rm file.txt             # видалити файл (без кошика! назавжди)
+rm -rf node_modules     # видалити теку рекурсивно і без питань — обережно</code></pre>
+
+<h3>Три суперсили: grep, | і &gt;</h3>
+<p><strong>grep</strong> шукає рядки за шаблоном. <strong>Конвеєр (pipe) <code>|</code></strong> передає вивід однієї команди на вхід іншій — як труба, по якій вода тече з крана в чайник. <strong>Перенаправлення <code>&gt;</code></strong> записує вивід у файл замість екрана (<code>&gt;&gt;</code> — дописує в кінець).</p>
+<pre><code class="language-bash"># Знайти всі рядки з "TODO" у файлах .js у поточній теці і підтеках
+grep -rn "TODO" --include="*.js" .
+
+# Конвеєр: показати вміст → відфільтрувати → порахувати рядки
+cat app.log | grep "ERROR" | wc -l
+
+# Хто слухає порти? Відфільтрувати тільки node
+lsof -i -P | grep node
+
+# Записати результат у файл
+ls -la &gt; files.txt
+echo "нове" &gt;&gt; notes.txt
+
+# Історія команд і пошук по ній (Ctrl+R у більшості оболонок)
+history | grep "git commit"</code></pre>
+
+<figure>
+  <svg viewBox="0 0 720 200" role="img" aria-label="Конвеєр команд у терміналі">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="60" width="150" height="70" rx="12" class="blue"/>
+    <text x="95" y="90" text-anchor="middle" class="mono">cat app.log</text>
+    <text x="95" y="112" text-anchor="middle" class="muted">10 000 рядків</text>
+    <path d="M170 95 L230 95" class="arrow"/>
+    <text x="200" y="85" text-anchor="middle" class="bold">|</text>
+
+    <rect x="230" y="60" width="170" height="70" rx="12" class="accent"/>
+    <text x="315" y="90" text-anchor="middle" class="mono">grep "ERROR"</text>
+    <text x="315" y="112" text-anchor="middle" class="muted">лишає 37 рядків</text>
+    <path d="M400 95 L460 95" class="arrow"/>
+    <text x="430" y="85" text-anchor="middle" class="bold">|</text>
+
+    <rect x="460" y="60" width="110" height="70" rx="12" class="green"/>
+    <text x="515" y="90" text-anchor="middle" class="mono">wc -l</text>
+    <text x="515" y="112" text-anchor="middle" class="muted">→ 37</text>
+    <path d="M570 95 L630 95" class="arrow"/>
+    <text x="600" y="85" text-anchor="middle" class="bold">&gt;</text>
+    <rect x="630" y="70" width="80" height="50" rx="10" class="purple"/>
+    <text x="670" y="100" text-anchor="middle" class="mono">out.txt</text>
+    <text x="360" y="170" text-anchor="middle" class="muted">Кожна команда робить одну річ; труба з'єднує їх у ланцюжок</text>
+  </svg>
+  <figcaption>Схема 1. Конвеєр: вивід кожної команди стає входом наступної, а <code>&gt;</code> зберігає результат у файл.</figcaption>
+</figure>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Термінал — це спільна мова всіх інструментів. Кожна інструкція в документації, кожен CI-скрипт, кожен деплой — це команди. Хто не володіє терміналом, той копіює команди «наосліп» і не може зрозуміти, чому не спрацювало. Годину, вкладену в базові команди зараз, ви відіб'єте за перший тиждень.</p>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Відкрий термінал. Виконай <code>pwd</code>, потім <code>mkdir -p ~/projects/playground &amp;&amp; cd ~/projects/playground</code>.</li>
+    <li>Створи файл: <code>echo "рядок 1" &gt; test.txt</code>, допиши: <code>echo "рядок 2" &gt;&gt; test.txt</code>, подивись: <code>cat test.txt</code>.</li>
+    <li>Порахуй файли у своїй домашній теці: <code>ls ~ | wc -l</code>.</li>
+    <li>Знайди, де лежить node: <code>which node</code>. Якщо порожньо — час встановити (наступна секція).</li>
+    <li>Натисни Tab посеред набору назви файлу — оболонка доповнить. Натисни стрілку вгору — попередня команда.</li>
+  </ol>
+</div>
+
+<h2 id="s2">2. Редактор: VS Code</h2>
+<p>Код можна писати в Блокноті, але <strong>VS Code</strong> (Visual Studio Code) — безкоштовний редактор від Microsoft, який став стандартом: підсвічує синтаксис, підказує імена функцій, показує помилки до запуску, має вбудований термінал і Git. Встановлюється з <a href="https://code.visualstudio.com/" target="_blank" rel="noopener">code.visualstudio.com</a>. Після встановлення додайте команду <code>code</code> у термінал (Cmd+Shift+P → «Shell Command: Install 'code' command in PATH»), тоді <code>code .</code> відкриє поточну теку.</p>
+<p>Розширення, з яких варто почати:</p>
+<ul>
+  <li><strong>ESLint</strong> і <strong>Prettier</strong> — підкреслюють помилки і форматують код при збереженні (про них у секції 8).</li>
+  <li><strong>GitLens</strong> — показує, хто і коли змінив кожен рядок, прямо в редакторі.</li>
+  <li><strong>Error Lens</strong> — виводить текст помилки поряд із рядком, а не тільки червону хвильку.</li>
+  <li><strong>Live Server</strong> — відкриває HTML-файл через локальний сервер із автооновленням (потрібно для fetch, бо <code>file://</code> має обмеження).</li>
+  <li><strong>Path Intellisense</strong> — автодоповнення шляхів до файлів у імпортах.</li>
+</ul>
+<p>Гарячі клавіші, які економлять години: <kbd>Cmd/Ctrl+P</kbd> — швидко відкрити файл за назвою; <kbd>Cmd/Ctrl+Shift+P</kbd> — палітра команд; <kbd>Cmd/Ctrl+D</kbd> — виділити наступне таке саме слово (мультикурсор); <kbd>Cmd/Ctrl+`</kbd> — термінал; <kbd>F2</kbd> — перейменувати змінну скрізь; <kbd>Alt+↑/↓</kbd> — перемістити рядок.</p>
+
+<h2 id="s3">3. Node.js, npm, pnpm і package.json</h2>
+<p><strong>Node.js</strong> — це середовище, яке дозволяє запускати JavaScript поза браузером: на сервері, у терміналі, у скриптах збірки. Той самий двигун V8, що в Chrome, але замість <code>document</code> і <code>window</code> — доступ до файлів, мережі, процесів. Встановлюйте LTS-версію (зараз 20 або 22) через <a href="https://nodejs.org/" target="_blank" rel="noopener">nodejs.org</a> або менеджер версій <code>nvm</code> / <code>fnm</code>, щоб перемикатись між версіями для різних проєктів.</p>
+<pre><code class="language-bash">node --version         # v22.x.x
+npm --version          # 10.x.x
+
+# Запустити файл
+echo 'console.log("Привіт з Node!")' &gt; hello.js
+node hello.js
+
+# REPL — інтерактивна консоль
+node
+&gt; 2 + 2
+4
+&gt; .exit</code></pre>
+
+<h3>npm — магазин готових деталей</h3>
+<p><strong>npm (Node Package Manager)</strong> — це реєстр із понад двома мільйонами готових бібліотек (<strong>пакетів</strong>) і команда для їх встановлення. Хочете HTTP-сервер — <code>express</code>; дати — <code>date-fns</code>; перевірка даних — <code>zod</code>. <strong>pnpm</strong> — швидша альтернатива з тими самими командами: зберігає кожен пакет один раз на диску і робить посилання, тому <code>node_modules</code> не важить гігабайти. Команди майже ідентичні, у прикладах будемо показувати обидва.</p>
+
+<h3>package.json — паспорт проєкту</h3>
+<pre><code class="language-bash">mkdir my-app &amp;&amp; cd my-app
+npm init -y            # або pnpm init — створює package.json з відповідями «так» на все</code></pre>
+<pre><code class="language-json">{
+  "name": "my-app",
+  "version": "1.0.0",
+  "type": "module",                  // дозволяє import/export (ES modules)
+  "scripts": {
+    "dev": "node --watch server.js", // npm run dev — перезапуск при зміні файлів
+    "start": "node server.js",       // npm start (без run — для start і test)
+    "test": "node --test",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "express": "^5.1.0"              // потрібно в продакшені
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",              // потрібно тільки під час розробки
+    "prettier": "^3.3.0"
+  }
+}</code></pre>
+<ul>
+  <li><strong>dependencies</strong> — те, без чого програма не працює у продакшені (фреймворк, драйвер БД).</li>
+  <li><strong>devDependencies</strong> — інструменти розробки: лінтери, тести, TypeScript, збірка. На сервер їх не ставлять (<code>npm install --omit=dev</code>).</li>
+  <li><strong>scripts</strong> — ярлики для команд. <code>npm run dev</code> запускає те, що записано в <code>dev</code>. Так усі в команді запускають проєкт однаково, не пам'ятаючи довгих команд.</li>
+</ul>
+<pre><code class="language-bash">npm install express          # pnpm add express       → у dependencies
+npm install -D eslint        # pnpm add -D eslint     → у devDependencies
+npm uninstall express        # pnpm remove express
+npm install                  # pnpm install — встановити все з package.json (після клонування)
+npm run dev                  # pnpm dev
+npx eslint .                 # pnpm exec eslint . — запустити бінарник пакета без глобального встановлення
+npm outdated                 # що застаріло
+npm audit                    # відомі вразливості</code></pre>
+
+<h3>node_modules і lock-файли</h3>
+<p>Після <code>npm install</code> з'являється тека <strong>node_modules</strong> — туди фізично складаються пакети і всі <em>їхні</em> залежності (express тягне ще ~60 пакетів). Її ніколи не комітять у Git: вона величезна і повністю відновлюється з <code>package.json</code>. А от <strong>package-lock.json</strong> (або <code>pnpm-lock.yaml</code>) — комітять обов'язково. Він фіксує <em>точні</em> версії всього дерева залежностей, щоб у колеги і на сервері встановилось те саме, що у вас. Команда <code>npm ci</code> (clean install) ставить рівно те, що в lock-файлі, і використовується в CI.</p>
+
+<h3>Semver: що означає ^ і ~</h3>
+<p>Версії пакетів пишуться за <strong>семантичним версіонуванням (semver)</strong>: <code>MAJOR.MINOR.PATCH</code>, наприклад <code>5.1.3</code>. Кожне число — це обіцянка:</p>
+
+<figure>
+  <svg viewBox="0 0 720 300" role="img" aria-label="Семантичне версіонування і діапазони ^ та ~">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="130" y="20" width="110" height="56" rx="12" class="red"/>
+    <text x="185" y="44" text-anchor="middle" class="bold">5</text>
+    <text x="185" y="64" text-anchor="middle" class="muted">MAJOR</text>
+    <text x="255" y="52" text-anchor="middle" class="bold">.</text>
+    <rect x="270" y="20" width="110" height="56" rx="12" class="accent"/>
+    <text x="325" y="44" text-anchor="middle" class="bold">1</text>
+    <text x="325" y="64" text-anchor="middle" class="muted">MINOR</text>
+    <text x="395" y="52" text-anchor="middle" class="bold">.</text>
+    <rect x="410" y="20" width="110" height="56" rx="12" class="green"/>
+    <text x="465" y="44" text-anchor="middle" class="bold">3</text>
+    <text x="465" y="64" text-anchor="middle" class="muted">PATCH</text>
+
+    <text x="185" y="100" text-anchor="middle" class="small">ламає сумісність</text>
+    <text x="185" y="116" text-anchor="middle" class="small">(breaking change)</text>
+    <text x="325" y="100" text-anchor="middle" class="small">нова функція,</text>
+    <text x="325" y="116" text-anchor="middle" class="small">старе працює</text>
+    <text x="465" y="100" text-anchor="middle" class="small">виправлення</text>
+    <text x="465" y="116" text-anchor="middle" class="small">помилки</text>
+
+    <rect x="20" y="150" width="330" height="120" rx="12" class="box-fill"/>
+    <text x="35" y="175" class="mono">"express": "^5.1.3"</text>
+    <text x="35" y="198" class="small">caret: MAJOR зафіксовано, решта може рости</text>
+    <path d="M35 215 L320 215" class="arrow"/>
+    <text x="35" y="240" class="mono">5.1.3 → 5.1.9 → 5.4.0 ✓   6.0.0 ✗</text>
+    <text x="35" y="260" class="muted">типове значення за замовчуванням</text>
+
+    <rect x="370" y="150" width="330" height="120" rx="12" class="box-fill"/>
+    <text x="385" y="175" class="mono">"express": "~5.1.3"</text>
+    <text x="385" y="198" class="small">tilde: MAJOR і MINOR зафіксовано</text>
+    <path d="M385 215 L670 215" class="arrow"/>
+    <text x="385" y="240" class="mono">5.1.3 → 5.1.9 ✓   5.2.0 ✗</text>
+    <text x="385" y="260" class="muted">консервативніше: тільки патчі</text>
+  </svg>
+  <figcaption>Схема 2. Semver: три числа — три обіцянки. <code>^</code> дозволяє нові MINOR і PATCH, <code>~</code> — тільки PATCH.</figcaption>
+</figure>
+
+<p>Без префікса (<code>"5.1.3"</code>) — рівно ця версія. З <code>^0.x.y</code> поведінка особлива: для нульових мажорів «ламаючим» вважається MINOR, тому <code>^0.3.1</code> дозволить тільки <code>0.3.x</code>. Це чесно: пакет до 1.0 сам каже «я ще нестабільний».</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li>Помилка <code>Cannot use import statement outside a module</code> — забули <code>"type": "module"</code> у package.json або використовуйте розширення <code>.mjs</code>.</li>
+    <li>«У мене працює, у колеги ні» — хтось не закомітив lock-файл або в різних версіях Node. Додайте <code>"engines": {"node": "&gt;=20"}</code> і файл <code>.nvmrc</code>.</li>
+    <li><code>npm install</code> глобально (<code>-g</code>) — майже ніколи не потрібен. Використовуйте <code>npx</code>.</li>
+    <li>Не встановлюйте пакети з підозрілими назвами-«друкарськими помилками» (<code>expres</code>, <code>lodahs</code>) — це typosquatting, спосіб підсунути шкідливий код.</li>
+  </ul>
+</div>
+
+<h2 id="s4">4. Git: машина часу для коду</h2>
+<p><strong>Git</strong> — система <strong>керування версіями (version control system)</strong>. Вона вирішує дві проблеми, з якими стикається кожен, хто пише код довше за день:</p>
+<ol>
+  <li><strong>«Учора все працювало».</strong> Git зберігає знімки (<strong>коміти, commits</strong>) усього проєкту. Можна подивитись, що саме змінилось, і повернутись до будь-якого знімка. Це не «Ctrl+Z»: це повна історія з поясненнями, чому було зроблено кожну зміну.</li>
+  <li><strong>«Ми обоє правили один файл».</strong> Двоє (або двадцять) людей працюють над одним проєктом одночасно, кожен у своїй гілці, і Git уміє акуратно з'єднувати їхні зміни.</li>
+</ol>
+<p>Git — це <em>розподілена</em> система: у кожного розробника повна копія всієї історії на своєму комп'ютері. GitHub чи GitLab — просто «полиця», де лежить ще одна копія, зручна для обміну.</p>
+
+<h3>Три зони</h3>
+<p>Найважливіша ментальна модель Git — три зони, через які проходить кожна зміна:</p>
+
+<figure>
+  <svg viewBox="0 0 720 300" role="img" aria-label="Зони Git: робоча тека, staging, репозиторій, віддалений">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="15" y="60" width="150" height="120" rx="12" class="accent"/>
+    <text x="90" y="88" text-anchor="middle" class="bold">Робоча тека</text>
+    <text x="90" y="108" text-anchor="middle" class="muted">working directory</text>
+    <text x="90" y="135" text-anchor="middle" class="small">файли, які ви</text>
+    <text x="90" y="151" text-anchor="middle" class="small">редагуєте зараз</text>
+
+    <rect x="200" y="60" width="150" height="120" rx="12" class="blue"/>
+    <text x="275" y="88" text-anchor="middle" class="bold">Staging</text>
+    <text x="275" y="108" text-anchor="middle" class="muted">index</text>
+    <text x="275" y="135" text-anchor="middle" class="small">«коробка» для</text>
+    <text x="275" y="151" text-anchor="middle" class="small">наступного знімка</text>
+
+    <rect x="385" y="60" width="150" height="120" rx="12" class="green"/>
+    <text x="460" y="88" text-anchor="middle" class="bold">Репозиторій</text>
+    <text x="460" y="108" text-anchor="middle" class="muted">.git — локально</text>
+    <text x="460" y="135" text-anchor="middle" class="small">історія комітів</text>
+    <text x="460" y="151" text-anchor="middle" class="small">на вашому диску</text>
+
+    <rect x="565" y="60" width="140" height="120" rx="12" class="purple"/>
+    <text x="635" y="88" text-anchor="middle" class="bold">Remote</text>
+    <text x="635" y="108" text-anchor="middle" class="muted">origin — GitHub</text>
+    <text x="635" y="135" text-anchor="middle" class="small">спільна копія</text>
+    <text x="635" y="151" text-anchor="middle" class="small">в інтернеті</text>
+
+    <path d="M165 100 L200 100" class="arrow"/>
+    <text x="182" y="90" text-anchor="middle" class="mono">add</text>
+    <path d="M350 100 L385 100" class="arrow"/>
+    <text x="367" y="90" text-anchor="middle" class="mono">commit</text>
+    <path d="M535 100 L565 100" class="arrow"/>
+    <text x="550" y="90" text-anchor="middle" class="mono">push</text>
+
+    <path d="M565 150 L535 150" class="arrow"/>
+    <text x="550" y="170" text-anchor="middle" class="mono">fetch</text>
+    <path d="M385 150 L165 150" class="arrow dashed"/>
+    <text x="275" y="170" text-anchor="middle" class="mono">checkout / pull</text>
+
+    <text x="360" y="230" text-anchor="middle" class="small">git status показує, у якій зоні кожен файл</text>
+    <text x="360" y="252" text-anchor="middle" class="small">git diff — різниця між робочою текою і staging; git diff --staged — між staging і останнім комітом</text>
+  </svg>
+  <figcaption>Схема 3. Зміна проходить шлях: робоча тека → (add) → staging → (commit) → локальний репозиторій → (push) → віддалений.</figcaption>
+</figure>
+
+<p>Навіщо staging? Щоб коміт був <em>осмисленим</em>. Ви поправили три файли: два — виправлення бага, один — новий стиль кнопки. Можна додати в staging тільки перші два і закомітити «fix: ...», потім третій — «style: ...». Історія стає читабельною.</p>
+
+<h3>Базові команди</h3>
+<pre><code class="language-bash"># Один раз на комп'ютері — хто автор комітів
+git config --global user.name "Ім'я Прізвище"
+git config --global user.email "you@example.com"
+git config --global init.defaultBranch main
+
+# Почати відстежувати проєкт
+cd my-app
+git init                        # створює приховану теку .git
+
+git status                      # що змінилось, що в staging, у якій гілці
+git add index.html              # покласти файл у staging
+git add .                       # усі зміни в поточній теці
+git commit -m "feat: додати сторінку списку справ"   # зробити знімок
+
+git log --oneline --graph       # історія коротко
+git diff                        # що я змінив і ще не додав
+git diff --staged               # що піде в наступний коміт
+git show HEAD                   # показати останній коміт повністью
+
+# Відкотити
+git restore index.html          # скасувати незакомічені зміни у файлі
+git restore --staged index.html # прибрати зі staging (файл не чіпає)
+git revert HEAD                 # створити новий коміт, що скасовує останній — безпечно для спільної історії</code></pre>
+<p>Кожен коміт має <strong>хеш</strong> — 40 символів на кшталт <code>a1b2c3d...</code> (зазвичай показують перші 7). Це його ім'я; за ним можна повернутись у будь-який момент історії. <code>HEAD</code> — вказівник на «де я зараз», зазвичай на останньому коміті поточної гілки.</p>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Git — це єдиний інструмент, яким користуються 100% команд, незалежно від мови і стеку. Без нього не буває pull request, code review, CI/CD і деплою. Співбесіда на будь-яку junior-позицію включає питання про Git. Але головне — він дає сміливість експериментувати: зламали — повернулись.</p>
+</div>
+
+<h2 id="s5">5. Гілки, merge і rebase</h2>
+<p><strong>Гілка (branch)</strong> — це паралельна лінія історії. Технічно це просто рухомий вказівник на коміт, тому створення гілки миттєве і безкоштовне. Правило: <code>main</code> завжди робочий, кожна фіча чи виправлення — в окремій гілці.</p>
+<pre><code class="language-bash">git branch                          # список гілок, * — поточна
+git switch -c feature/login         # створити і перейти (старий синтаксис: checkout -b)
+# ... робите коміти ...
+git switch main                     # повернутись
+git merge feature/login             # влити гілку в main
+git branch -d feature/login         # видалити гілку після злиття</code></pre>
+
+<figure>
+  <svg viewBox="0 0 720 340" role="img" aria-label="Гілки: merge і rebase">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="180" y="24" text-anchor="middle" class="bold">git merge</text>
+    <circle cx="40" cy="80" r="12" class="blue"/>
+    <circle cx="100" cy="80" r="12" class="blue"/>
+    <circle cx="160" cy="80" r="12" class="blue"/>
+    <circle cx="280" cy="80" r="14" class="purple"/>
+    <path d="M52 80 L88 80" class="arrow"/>
+    <path d="M112 80 L148 80" class="arrow"/>
+    <path d="M172 80 L266 80" class="arrow"/>
+    <text x="40" y="112" text-anchor="middle" class="mono">A</text>
+    <text x="100" y="112" text-anchor="middle" class="mono">B</text>
+    <text x="160" y="112" text-anchor="middle" class="mono">C</text>
+    <text x="280" y="112" text-anchor="middle" class="mono">M</text>
+    <text x="20" y="62" class="small">main</text>
+    <circle cx="160" cy="150" r="12" class="green"/>
+    <circle cx="220" cy="150" r="12" class="green"/>
+    <path d="M110 88 C 130 110, 140 150, 148 150" class="arrow"/>
+    <path d="M172 150 L208 150" class="arrow"/>
+    <path d="M232 150 C 250 150, 260 110, 270 92" class="arrow"/>
+    <text x="160" y="182" text-anchor="middle" class="mono">D</text>
+    <text x="220" y="182" text-anchor="middle" class="mono">E</text>
+    <text x="230" y="205" text-anchor="middle" class="small">feature</text>
+    <text x="180" y="240" text-anchor="middle" class="small">M — merge-коміт з двома батьками (C і E).</text>
+    <text x="180" y="258" text-anchor="middle" class="small">Історія зберігається як була, зі «стрибком».</text>
+
+    <text x="540" y="24" text-anchor="middle" class="bold">git rebase</text>
+    <circle cx="400" cy="80" r="12" class="blue"/>
+    <circle cx="460" cy="80" r="12" class="blue"/>
+    <circle cx="520" cy="80" r="12" class="blue"/>
+    <circle cx="580" cy="80" r="12" class="green"/>
+    <circle cx="640" cy="80" r="12" class="green"/>
+    <path d="M412 80 L448 80" class="arrow"/>
+    <path d="M472 80 L508 80" class="arrow"/>
+    <path d="M532 80 L568 80" class="arrow"/>
+    <path d="M592 80 L628 80" class="arrow"/>
+    <text x="400" y="112" text-anchor="middle" class="mono">A</text>
+    <text x="460" y="112" text-anchor="middle" class="mono">B</text>
+    <text x="520" y="112" text-anchor="middle" class="mono">C</text>
+    <text x="580" y="112" text-anchor="middle" class="mono">D'</text>
+    <text x="640" y="112" text-anchor="middle" class="mono">E'</text>
+    <circle cx="520" cy="150" r="12" class="green" stroke-dasharray="4 3"/>
+    <circle cx="580" cy="150" r="12" class="green" stroke-dasharray="4 3"/>
+    <text x="520" y="182" text-anchor="middle" class="muted">D</text>
+    <text x="580" y="182" text-anchor="middle" class="muted">E</text>
+    <path d="M470 88 C 490 110, 500 150, 508 150" class="arrow dashed"/>
+    <path d="M550 140 C 560 120, 570 100, 575 92" class="arrow dashed"/>
+    <text x="540" y="240" text-anchor="middle" class="small">Коміти D, E «переписані» як D', E' поверх C.</text>
+    <text x="540" y="258" text-anchor="middle" class="small">Історія лінійна, але хеші змінились.</text>
+    <text x="360" y="315" text-anchor="middle" class="muted">Правило: rebase тільки свої локальні коміти; те, що вже запушили, — merge</text>
+  </svg>
+  <figcaption>Схема 4. Merge зберігає справжню історію з розгалуженням; rebase переносить ваші коміти поверх чужих і робить історію прямою.</figcaption>
+</figure>
+
+<p><strong>Merge</strong> створює «злиття» з двома батьками — чесно показує, що робота йшла паралельно. <strong>Rebase</strong> бере ваші коміти і «пересаджує» їх на вершину іншої гілки, ніби ви почали роботу пізніше. Історія стає лінійною і читабельною, але коміти отримують нові хеші. Звідси залізне правило: <em>ніколи не робіть rebase гілки, яку вже хтось інший забрав до себе</em> — у нього залишаться старі хеші, і при наступному злитті буде хаос.</p>
+<p>Типова практика: перед відкриттям pull request оновити свою гілку на свіжий <code>main</code> через <code>git rebase main</code> (це ваші локальні коміти — можна), а сам PR вливати через merge (або squash-merge, коли всі коміти гілки стискаються в один).</p>
+
+<h3>Конфлікти</h3>
+<p>Якщо ви і колега змінили <em>той самий рядок</em> того самого файлу, Git не знає, чиє правильне, і зупиняється з <strong>конфліктом (conflict)</strong>. У файлі з'являються маркери:</p>
+<pre><code class="language-js">function greet() {
+&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
+  return "Привіт, світе!";        // ваша версія (поточна гілка)
+=======
+  return "Вітаю, користувачу!";  // версія з гілки, яку зливаєте
+&gt;&gt;&gt;&gt;&gt;&gt;&gt; feature/greeting
+}</code></pre>
+<p>Розв'язати конфлікт означає: відкрити файл, залишити правильний варіант (або скомбінувати), прибрати всі маркери <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code>, <code>=======</code>, <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code>, потім <code>git add файл</code> і <code>git commit</code> (або <code>git rebase --continue</code>, якщо це був rebase). VS Code показує кнопки «Accept Current / Incoming / Both» прямо над конфліктом. Якщо все пішло не так — <code>git merge --abort</code> або <code>git rebase --abort</code> повертає все, як було.</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><code>git push --force</code> на спільну гілку перезаписує чужу роботу. Якщо вже дуже треба — <code>--force-with-lease</code>: він відмовиться, якщо хтось запушив після вас.</li>
+    <li>Закомітили у <code>main</code> замість гілки: <code>git switch -c feature/x</code> (гілка створиться з поточними комітами), потім <code>git switch main &amp;&amp; git reset --hard origin/main</code>.</li>
+    <li>Закомітили пароль. Просто видалити файл наступним комітом не допоможе — він в історії. Вважайте секрет скомпрометованим, змініть його, а історію чистіть через <code>git filter-repo</code>.</li>
+    <li>Величезні коміти «зробив усе» — неможливо ревʼювати і неможливо відкотити частину. Комітьте маленькими логічними кроками.</li>
+  </ul>
+</div>
+
+<h2 id="s6">6. GitHub, pull request і командний потік</h2>
+<p><strong>GitHub</strong> (і GitLab, Bitbucket) — сервіс, що хостить Git-репозиторії і додає командну роботу зверху: <strong>pull request (PR)</strong>, обговорення, автоматичні перевірки (CI), issue-трекер. Створіть акаунт на <a href="https://github.com/" target="_blank" rel="noopener">github.com</a> і налаштуйте SSH-ключ або <code>gh auth login</code> через GitHub CLI, щоб не вводити пароль щоразу.</p>
+<pre><code class="language-bash"># Прив'язати локальний репозиторій до GitHub (після створення там порожнього репо)
+git remote add origin git@github.com:you/my-app.git
+git push -u origin main         # -u запам'ятає зв'язок; далі просто git push
+
+# Забрати чужий проєкт
+git clone git@github.com:you/my-app.git
+cd my-app &amp;&amp; npm install
+
+# Синхронізуватись
+git fetch                       # завантажити зміни, не чіпаючи мої файли
+git pull                        # fetch + merge у поточну гілку
+git pull --rebase               # fetch + rebase — чистіша історія</code></pre>
+
+<h3>Типовий робочий потік команди</h3>
+<figure>
+  <svg viewBox="0 0 720 330" role="img" aria-label="Робочий потік з pull request">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="200" height="54" rx="12" class="blue"/>
+    <text x="120" y="42" text-anchor="middle" class="bold">1. git switch main</text>
+    <text x="120" y="62" text-anchor="middle" class="mono">git pull</text>
+    <path d="M120 74 L120 100" class="arrow"/>
+
+    <rect x="20" y="100" width="200" height="54" rx="12" class="blue"/>
+    <text x="120" y="122" text-anchor="middle" class="bold">2. Нова гілка</text>
+    <text x="120" y="142" text-anchor="middle" class="mono">switch -c feat/cart</text>
+    <path d="M120 154 L120 180" class="arrow"/>
+
+    <rect x="20" y="180" width="200" height="54" rx="12" class="accent"/>
+    <text x="120" y="202" text-anchor="middle" class="bold">3. Код + коміти</text>
+    <text x="120" y="222" text-anchor="middle" class="mono">add → commit (×N)</text>
+    <path d="M120 234 L120 260" class="arrow"/>
+
+    <rect x="20" y="260" width="200" height="54" rx="12" class="accent"/>
+    <text x="120" y="282" text-anchor="middle" class="bold">4. Push гілки</text>
+    <text x="120" y="302" text-anchor="middle" class="mono">push -u origin feat/cart</text>
+    <path d="M220 287 L260 287" class="arrow"/>
+
+    <rect x="260" y="260" width="200" height="54" rx="12" class="purple"/>
+    <text x="360" y="282" text-anchor="middle" class="bold">5. Pull Request</text>
+    <text x="360" y="302" text-anchor="middle" class="muted">на GitHub: опис, скріншоти</text>
+    <path d="M360 260 L360 234" class="arrow"/>
+
+    <rect x="260" y="180" width="200" height="54" rx="12" class="purple"/>
+    <text x="360" y="202" text-anchor="middle" class="bold">6. CI: тести, lint</text>
+    <text x="360" y="222" text-anchor="middle" class="muted">автоматично</text>
+    <path d="M360 180 L360 154" class="arrow"/>
+
+    <rect x="260" y="100" width="200" height="54" rx="12" class="purple"/>
+    <text x="360" y="122" text-anchor="middle" class="bold">7. Code review</text>
+    <text x="360" y="142" text-anchor="middle" class="muted">колега читає, коментує</text>
+    <path d="M460 127 L500 127" class="arrow"/>
+    <path d="M300 100 C 240 60, 160 60, 130 180" class="arrow dashed"/>
+    <text x="215" y="66" text-anchor="middle" class="small">правки → назад до 3</text>
+
+    <rect x="500" y="100" width="200" height="54" rx="12" class="green"/>
+    <text x="600" y="122" text-anchor="middle" class="bold">8. Merge у main</text>
+    <text x="600" y="142" text-anchor="middle" class="muted">squash або merge</text>
+    <path d="M600 154 L600 180" class="arrow"/>
+    <rect x="500" y="180" width="200" height="54" rx="12" class="green"/>
+    <text x="600" y="202" text-anchor="middle" class="bold">9. Deploy</text>
+    <text x="600" y="222" text-anchor="middle" class="muted">CD викочує main</text>
+    <path d="M600 234 L600 260" class="arrow"/>
+    <rect x="500" y="260" width="200" height="54" rx="12" class="green"/>
+    <text x="600" y="282" text-anchor="middle" class="bold">10. Видалити гілку</text>
+    <text x="600" y="302" text-anchor="middle" class="mono">branch -d feat/cart</text>
+  </svg>
+  <figcaption>Схема 5. GitHub Flow: гілка → коміти → PR → CI + ревʼю → merge → деплой. Крок 7 може повертати до кроку 3 кілька разів.</figcaption>
+</figure>
+
+<p><strong>Code review</strong> — це не екзамен, а спільне читання коду: колега шукає баги, пропонує простіші рішення, ділиться знанням про кодову базу. Гарний PR — маленький (до ~300 рядків), з описом «що і навіщо», зі скріншотом, якщо є UI. Гарний ревʼюер — коментує конкретно, пояснює «чому», відрізняє «обов'язково» від «на ваш розсуд» (nit:).</p>
+
+<h3>Гарні повідомлення комітів</h3>
+<p>Коміт «fix» через півроку нічого не скаже. Стандарт <strong>Conventional Commits</strong> задає формат: <code>тип(область): короткий опис</code>. Типи: <code>feat</code> (нова функція), <code>fix</code> (виправлення), <code>docs</code>, <code>style</code> (форматування), <code>refactor</code>, <code>test</code>, <code>chore</code> (службове: залежності, конфіги). Опис — у наказовому способі, без крапки в кінці, до 72 символів. Детальніше — в тілі після порожнього рядка.</p>
+<pre><code class="language-text">feat(cart): додати кнопку «Очистити кошик»
+
+Користувачі просили спосіб швидко прибрати всі товари.
+Кнопка показується тільки якщо кошик не порожній.
+
+Closes #42</code></pre>
+<p>Такий формат читається людьми і машинами: з нього автоматично генерують changelog і визначають наступну версію за semver (feat → MINOR, fix → PATCH, <code>feat!:</code> або <code>BREAKING CHANGE</code> → MAJOR).</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Візьми проєкт «список справ» з розділу 02. У його теці: <code>git init</code>, <code>git add .</code>, <code>git commit -m "feat: початковий список справ"</code>.</li>
+    <li>Створи гілку <code>git switch -c feat/clear-done</code>, додай кнопку «Очистити виконані», закоміть із правильним повідомленням.</li>
+    <li>Повернись у <code>main</code>, зміни колір кнопки «Додати» у CSS, закоміть. Тепер <code>git merge feat/clear-done</code>. Конфлікту не буде — різні файли. Подивись <code>git log --oneline --graph</code>.</li>
+    <li>Тепер створи конфлікт навмисно: у двох гілках зміни один і той самий рядок заголовка <code>&lt;h1&gt;</code>. Злий і розв'яжи конфлікт руками.</li>
+    <li>Створи репозиторій на GitHub, запуш, відкрий Pull Request із нової гілки у main і злий його через інтерфейс.</li>
+    <li>Пройди перші 2 рівні на <a href="https://learngitbranching.js.org/?locale=uk_UA" target="_blank" rel="noopener">learngitbranching.js.org</a> — це візуальний тренажер гілок.</li>
+  </ol>
+</div>
+
+<h2 id="s7">7. Секрети, .env і .gitignore</h2>
+<p>Ваш код рано чи пізно потребуватиме пароль від бази даних, ключ платіжної системи, токен API. <strong>Ніколи не пишіть їх у коді і ніколи не комітьте.</strong> Репозиторій може стати публічним, його бачить уся команда, підрядники, і боти сканують GitHub на витоки ключів за секунди після пушу.</p>
+<p>Стандарт — файл <strong>.env</strong> у корені проєкту: рядки <code>КЛЮЧ=значення</code>, які читаються як <strong>змінні середовища (environment variables)</strong>. Node 20+ уміє читати його без бібліотек через прапорець <code>--env-file</code>:</p>
+<pre><code class="language-bash"># .env — НЕ комітити
+DATABASE_URL=postgres://user:secret@localhost:5432/app
+STRIPE_SECRET_KEY=sk_test_abc123
+PORT=3000</code></pre>
+<pre><code class="language-bash"># .env.example — комітити: ті самі ключі, але без значень, як документація
+DATABASE_URL=
+STRIPE_SECRET_KEY=
+PORT=3000</code></pre>
+<pre><code class="language-js">// server.js — запуск: node --env-file=.env server.js
+const port = process.env.PORT ?? 3000;
+const dbUrl = process.env.DATABASE_URL;
+
+if (!dbUrl) {
+  throw new Error("DATABASE_URL не задано. Скопіюйте .env.example у .env");
+}
+console.log(`Сервер на порту ${port}`);</code></pre>
+<p>На сервері чи в CI ці змінні задаються в панелі хостингу або в налаштуваннях GitHub Actions (Secrets) — файл .env там не потрібен.</p>
+
+<h3>.gitignore</h3>
+<p>Файл <strong>.gitignore</strong> у корені проєкту перелічує, що Git має ігнорувати. Мінімальний набір для Node-проєкту:</p>
+<pre><code class="language-text"># залежності — відновлюються з package.json
+node_modules/
+
+# секрети
+.env
+.env.*
+!.env.example
+
+# збірка
+dist/
+build/
+.next/
+
+# логи і системне сміття
+*.log
+.DS_Store
+Thumbs.db
+
+# редактор
+.vscode/*
+!.vscode/extensions.json
+.idea/</code></pre>
+<p>Якщо файл уже закомічений, додавання в .gitignore його не прибере: виконайте <code>git rm --cached .env</code>, потім закомітьте. Готові шаблони для будь-якої мови є на <a href="https://github.com/github/gitignore" target="_blank" rel="noopener">github.com/github/gitignore</a>.</p>
+
+<div class="box why">
+  <div name="title" class="title">Чому це важливо</div>
+  <p>Витік одного ключа AWS у публічний репозиторій — це реальні рахунки на тисячі доларів за майнінг криптовалюти на ваших серверах протягом ночі. Це трапляється щодня. Розділення коду і конфігурації (12-factor app, принцип «Config») — не педантизм, а страховка.</p>
+</div>
+
+<h2 id="s8">8. Лінтери, форматери і TypeScript</h2>
+<h3>ESLint — знаходить помилки до запуску</h3>
+<p><strong>Лінтер (linter)</strong> читає код і шукає підозрілі місця: невикористана змінна, <code>==</code> замість <code>===</code>, забутий <code>await</code>, недосяжний код. Це як перевірка орфографії в тексті. <strong>ESLint</strong> — стандарт для JavaScript і TypeScript.</p>
+<pre><code class="language-bash">npm init @eslint/config@latest      # інтерактивно створить eslint.config.js
+npx eslint .                        # перевірити все
+npx eslint . --fix                  # виправити те, що вміє</code></pre>
+<pre><code class="language-js">// eslint.config.js (flat config, ESLint 9+)
+import js from "@eslint/js";
+import globals from "globals";
+
+export default [
+  js.configs.recommended,             // набір розумних правил за замовчуванням
+  {
+    languageOptions: { globals: { ...globals.browser, ...globals.node } },
+    rules: {
+      "no-unused-vars": "warn",       // попереджати, а не падати
+      "eqeqeq": "error",              // тільки ===
+    },
+  },
+];</code></pre>
+
+<h3>Prettier — форматує, щоб не сперечатись</h3>
+<p><strong>Форматер (formatter)</strong> переписує код за єдиними правилами: відступи, лапки, крапки з комою, довжина рядка. Суперечки «таби чи пробіли» зникають: команда обирає конфіг один раз, і Prettier форматує при збереженні. Він не шукає помилок — тільки вигляд.</p>
+<pre><code class="language-bash">npm install -D prettier
+echo '{ "semi": true, "singleQuote": false, "printWidth": 100 }' &gt; .prettierrc
+npx prettier --write .              # відформатувати все
+npx prettier --check .              # перевірити (для CI)</code></pre>
+<p>У VS Code: встановіть розширення Prettier, у налаштуваннях увімкніть <code>"editor.formatOnSave": true</code> і <code>"editor.defaultFormatter": "esbenp.prettier-vscode"</code>. Щоб ESLint не сварився з Prettier за форматування, додайте <code>eslint-config-prettier</code>, який вимикає конфліктні правила. Часто обидва запускають перед комітом через <strong>git hooks</strong> (пакети <code>husky</code> + <code>lint-staged</code>), щоб поганий код фізично не потрапив у репозиторій.</p>
+
+<h3>TypeScript — навіщо типи</h3>
+<p>JavaScript дозволяє написати <code>user.nmae</code> замість <code>user.name</code>, і ви дізнаєтесь про помилку тільки коли користувач побачить <code>undefined</code> на екрані. <strong>TypeScript</strong> — це JavaScript плюс <strong>типи (types)</strong>: ви описуєте, якої форми дані, і компілятор перевіряє це <em>до</em> запуску. Аналогія: розетки. У JS будь-яку вилку можна встромити в будь-яку розетку, і іноді щось вибухає. TypeScript робить вилки різної форми — не та не влізе фізично, і ви побачите це ще в редакторі, а не в продакшені о третій ночі.</p>
+
+<figure>
+  <svg viewBox="0 0 720 240" role="img" aria-label="TypeScript: перевірка типів до запуску">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="40" width="160" height="70" rx="12" class="blue"/>
+    <text x="100" y="68" text-anchor="middle" class="bold">app.ts</text>
+    <text x="100" y="90" text-anchor="middle" class="muted">код з типами</text>
+    <path d="M180 75 L250 75" class="arrow"/>
+    <rect x="250" y="40" width="180" height="70" rx="12" class="purple"/>
+    <text x="340" y="68" text-anchor="middle" class="bold">tsc / редактор</text>
+    <text x="340" y="90" text-anchor="middle" class="muted">перевірка типів</text>
+    <path d="M430 60 L520 60" class="arrow"/>
+    <rect x="520" y="30" width="180" height="56" rx="12" class="green"/>
+    <text x="610" y="53" text-anchor="middle" class="bold">app.js</text>
+    <text x="610" y="73" text-anchor="middle" class="muted">типи видалено → запуск</text>
+    <path d="M430 92 L520 130" class="arrow"/>
+    <rect x="520" y="120" width="180" height="56" rx="12" class="red"/>
+    <text x="610" y="143" text-anchor="middle" class="bold">Помилка в редакторі</text>
+    <text x="610" y="163" text-anchor="middle" class="mono">Property 'nmae'...</text>
+    <text x="360" y="215" text-anchor="middle" class="muted">У браузер і Node потрапляє звичайний JavaScript — типи існують тільки під час розробки</text>
+  </svg>
+  <figcaption>Схема 6. TypeScript перевіряє типи і компілює у звичайний JS; помилки ловляться до запуску.</figcaption>
+</figure>
+
+<pre><code class="language-ts">// Описуємо форму даних
+type Todo = {
+  id: number;
+  text: string;
+  done: boolean;
+  dueDate?: Date;          // ? — необов'язкове поле
+};
+
+// Функція каже, що приймає і що повертає
+function toggle(todo: Todo): Todo {
+  return { ...todo, done: !todo.done };
+}
+
+const t: Todo = { id: 1, text: "Вивчити TS", done: false };
+toggle(t);                 // ✓
+toggle({ id: 2 });         // ✗ Помилка: бракує text і done
+t.nmae;                    // ✗ Помилка: Property 'nmae' does not exist. Did you mean 'name'?
+
+// Об'єднання типів: значення може бути одним із варіантів
+type Status = "idle" | "loading" | "error";
+let s: Status = "loading";
+s = "done";                // ✗ Помилка: "done" не входить у Status
+
+// Дженерики: функція, що працює з будь-яким типом, не втрачаючи його
+function first&lt;T&gt;(arr: T[]): T | undefined {
+  return arr[0];
+}
+const n = first([1, 2, 3]);      // n: number | undefined
+const w = first(["a", "b"]);     // w: string | undefined</code></pre>
+<pre><code class="language-bash">npm install -D typescript
+npx tsc --init                    # створює tsconfig.json
+npx tsc --noEmit                  # тільки перевірити типи, нічого не генерувати
+node --experimental-strip-types app.ts   # Node 22+: запустити .ts напряму (тільки прості типи)</code></pre>
+<p>Головна цінність TypeScript — не «зловити описку», а <em>документація, що не бреше</em>: коли ви бачите <code>function save(user: User)</code>, ви точно знаєте, що передати, і редактор підкаже поля. У великих проєктах це економить більше часу, ніж витрачається на написання типів. Далі в посібнику весь код буде на TypeScript.</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Усі інструменти цього розділу складаються в один конвеєр якості: <code>husky</code> запускає <code>lint-staged</code> перед комітом → той проганяє Prettier і ESLint тільки по змінених файлах → CI на GitHub Actions запускає <code>tsc --noEmit</code>, <code>eslint</code>, тести на кожен PR → merge заблоковано, поки перевірки червоні. Це називається «shift left» — ловити проблеми якомога раніше, де вони найдешевші. Налаштування цього конвеєра — тема розділу 11, але вже зараз варто увімкнути <code>formatOnSave</code> і додати скрипт <code>"check": "tsc --noEmit &amp;&amp; eslint . &amp;&amp; prettier --check ."</code> у package.json.</p>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Що робить команда <code>cat app.log | grep ERROR | wc -l</code>?</summary><p>Виводить файл, залишає тільки рядки з «ERROR», рахує їх кількість. Три команди з'єднані конвеєром: вивід кожної — вхід наступної.</p></details>
+  <details><summary>2. Чим dependencies відрізняються від devDependencies?</summary><p>dependencies потрібні для роботи програми у продакшені (express, драйвер БД). devDependencies — тільки під час розробки (eslint, prettier, typescript, тести); на сервер їх не ставлять.</p></details>
+  <details><summary>3. Що дозволить встановити <code>"^4.2.1"</code>, а що — <code>"~4.2.1"</code>?</summary><p>^ — будь-яку 4.x.y від 4.2.1 і вище (4.2.9, 4.7.0), але не 5.0.0. ~ — тільки 4.2.x (4.2.9), але не 4.3.0.</p></details>
+  <details><summary>4. Навіщо комітити lock-файл, якщо є package.json?</summary><p>package.json задає діапазони; lock-файл фіксує точні версії всього дерева залежностей, тому у всіх встановлюється однакове. Без нього «у мене працює, у тебе ні».</p></details>
+  <details><summary>5. Назвіть три зони Git і команди переходу між ними.</summary><p>Робоча тека → (git add) → staging → (git commit) → локальний репозиторій → (git push) → віддалений. Назад: fetch/pull, checkout/restore.</p></details>
+  <details><summary>6. Коли merge, а коли rebase?</summary><p>Rebase — для своїх локальних комітів, щоб оновити гілку на свіжий main і мати лінійну історію. Merge — для всього, що вже запушили і бачили інші, бо rebase переписує хеші.</p></details>
+  <details><summary>7. Як розв'язати конфлікт?</summary><p>Відкрити файл, обрати правильний варіант між маркерами &lt;&lt;&lt;&lt;&lt;&lt;&lt; / ======= / &gt;&gt;&gt;&gt;&gt;&gt;&gt;, видалити маркери, git add файл, git commit (або rebase --continue). Скасувати — merge --abort.</p></details>
+  <details><summary>8. Що робити, якщо випадково закомітили .env з паролем?</summary><p>Вважати пароль скомпрометованим і змінити його негайно; додати .env у .gitignore; git rm --cached .env; за потреби вичистити історію через git filter-repo. Просто видалити файл наступним комітом недостатньо — він в історії.</p></details>
+  <details><summary>9. Чим ESLint відрізняється від Prettier?</summary><p>ESLint шукає помилки і підозрілі патерни в логіці (невикористані змінні, ==). Prettier тільки форматує вигляд (відступи, лапки). Використовують обидва разом з eslint-config-prettier.</p></details>
+  <details><summary>10. Що дає TypeScript, якщо в браузер усе одно потрапляє JavaScript?</summary><p>Перевірку форми даних до запуску, автодоповнення і документацію, що не застаріває. Помилки типу «немає такого поля» ловляться в редакторі, а не в користувача.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>Термінал — спільна мова інструментів: pwd, ls, cd, mkdir, cat, grep, конвеєр <code>|</code>, перенаправлення <code>&gt;</code>.</li>
+  <li>Node.js запускає JS поза браузером; npm/pnpm ставлять пакети; package.json — паспорт проєкту зі scripts.</li>
+  <li>dependencies для продакшену, devDependencies для розробки; node_modules не комітять, lock-файл — обов'язково.</li>
+  <li>Semver MAJOR.MINOR.PATCH: <code>^</code> дозволяє MINOR і PATCH, <code>~</code> — тільки PATCH.</li>
+  <li>Git: робоча тека → add → staging → commit → репозиторій → push → remote. <code>git status</code> — ваш компас.</li>
+  <li>Кожна задача — в окремій гілці; merge зберігає історію, rebase випрямляє; rebase тільки для незапушених комітів.</li>
+  <li>Конфлікт — це нормально: обрати варіант, прибрати маркери, add, commit.</li>
+  <li>GitHub Flow: гілка → PR → CI + ревʼю → merge → деплой. Маленькі PR, Conventional Commits.</li>
+  <li>Секрети в .env, .env у .gitignore, .env.example у репозиторії.</li>
+  <li>ESLint ловить помилки, Prettier форматує, TypeScript перевіряє типи — усі три до запуску коду.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://git-scm.com/book/uk/v2" target="_blank" rel="noopener">Pro Git (українською)</a> — офіційна книга про Git, безкоштовна; розділи 1–3 дають усе для щоденної роботи, розділ 7 — для складних випадків.</li>
+    <li><a href="https://learngitbranching.js.org/?locale=uk_UA" target="_blank" rel="noopener">Learn Git Branching</a> — інтерактивний тренажер гілок, merge і rebase з візуалізацією; найкращий спосіб «побачити» схему 4 руками.</li>
+    <li><a href="https://docs.github.com/en/get-started" target="_blank" rel="noopener">GitHub Docs — Get started</a> — офіційні гайди: створення репозиторію, SSH-ключі, pull request, GitHub Flow.</li>
+    <li><a href="https://docs.npmjs.com/" target="_blank" rel="noopener">npm Docs</a> — документація package.json, scripts, semver-діапазонів і команд npm.</li>
+    <li><a href="https://pnpm.io/motivation" target="_blank" rel="noopener">pnpm — Motivation</a> — чому pnpm швидший і економніший за npm, і як він зберігає пакети.</li>
+    <li><a href="https://semver.org/lang/uk/" target="_blank" rel="noopener">Semantic Versioning (українською)</a> — специфікація semver: що означає кожне число і коли його підвищувати.</li>
+    <li><a href="https://www.conventionalcommits.org/uk/v1.0.0/" target="_blank" rel="noopener">Conventional Commits (українською)</a> — стандарт повідомлень комітів, який ми використовували.</li>
+    <li><a href="https://missing.csail.mit.edu/" target="_blank" rel="noopener">MIT — The Missing Semester of Your CS Education</a> — курс про термінал, shell-скрипти, Git, редактори; те, чого «не вчать в університеті».</li>
+    <li><a href="https://code.visualstudio.com/docs" target="_blank" rel="noopener">VS Code Docs</a> — офіційна документація редактора: налаштування, гарячі клавіші, робота з Git і терміналом.</li>
+    <li><a href="https://www.typescriptlang.org/docs/handbook/intro.html" target="_blank" rel="noopener">TypeScript Handbook</a> — офіційний підручник; почніть з «TypeScript for JavaScript Programmers» і «Everyday Types».</li>
+    <li><a href="https://eslint.org/docs/latest/use/getting-started" target="_blank" rel="noopener">ESLint — Getting Started</a> і <a href="https://prettier.io/docs/en/" target="_blank" rel="noopener">Prettier Docs</a> — налаштування лінтера і форматера, інтеграція з редактором.</li>
+    <li><a href="https://nodejs.org/en/learn/getting-started/introduction-to-nodejs" target="_blank" rel="noopener">Node.js — Introduction</a> — офіційний вступ до Node.js і його відмінностей від браузера.</li>
+    <li><a href="https://12factor.net/uk/config" target="_blank" rel="noopener">The Twelve-Factor App — Config (українською)</a> — чому конфігурацію і секрети зберігають у змінних середовища.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 03</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

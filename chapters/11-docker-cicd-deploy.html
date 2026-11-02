@@ -1,0 +1,868 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>11. Docker, CI/CD, хмара, деплой — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 11 · <span class="level-badge level-2">Середній</span></div>
+  <h1>Docker, CI/CD, хмара, деплой</h1>
+  <p class="lead">Після цього розділу ви зможете запакувати застосунок у контейнер, зібрати конвеєр, який тестує і викочує його автоматично, і зрозумієте, куди і як його розгортати — від Vercel до власного сервера і Kubernetes.</p>
+  <div class="meta"><span>⏱ ~100 хв</span><span>📚 Передумови: розділи 03, 04, 10</span><span>🎯 Ціль: задеплоїти API нотаток з Postgres через Compose і GitHub Actions</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Проблема «у мене працює»</a></li>
+    <li><a href="#s2">Віртуальна машина проти контейнера</a></li>
+    <li><a href="#s3">Docker: образ, контейнер, шари, Dockerfile</a></li>
+    <li><a href="#s4">Команди, томи, мережі, реєстри</a></li>
+    <li><a href="#s5">Docker Compose: app + Postgres + Redis</a></li>
+    <li><a href="#s6">12-factor, конфігурація і секрети</a></li>
+    <li><a href="#s7">CI/CD і GitHub Actions</a></li>
+    <li><a href="#s8">Стратегії деплою</a></li>
+    <li><a href="#s9">Куди деплоїти: PaaS, VPS, хмара</a></li>
+    <li><a href="#s10">Kubernetes: огляд</a></li>
+    <li><a href="#s11">Середовища, healthcheck, graceful shutdown</a></li>
+    <li><a href="#s12">Вартість і типові помилки</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви, що ти зібрав з LEGO чудову машинку і хочеш показати її другові. Але у друга вдома інші деталі, інший килим і його кіт постійно щось скидає. Машинка в нього розвалюється. Що робити? Покласти машинку разом з усіма її деталями, інструкцією і навіть шматочком твого килима в коробку. Друг відкриває коробку — і машинка працює точнісінько як у тебе, бо всередині коробки все твоє.</p>
+  <p>Ця коробка — контейнер (container). Інструкція, як зібрати коробку, — Dockerfile. А конвеєр CI/CD — це робот, який щоразу, коли ти щось змінив у машинці, сам перевіряє, чи вона їздить, пакує її в нову коробку і відвозить другові. Тобі лишається тільки будувати.</p>
+</div>
+
+<h2 id="s1">1. Проблема «у мене працює»</h2>
+<p>Класична сцена: розробник каже «у мене все працює», а на сервері застосунок падає. Причини можуть бути будь-якими: інша версія Node (у вас 22, на сервері 18), відсутня системна бібліотека для обробки зображень, інший часовий пояс, інша локаль, інший шлях до файлів, змінна середовища, яку хтось колись прописав у себе в <code>.zshrc</code> і забув. Кожен сервер потроху «дрейфує» від еталону, і за рік ніхто не знає, що на ньому насправді встановлено.</p>
+<p>Контейнер розв'язує це радикально: ви описуєте <em>все</em> оточення застосунку в коді (Dockerfile) — базову ОС, версію Node, залежності, файли, команду запуску. З цього опису збирається образ (image) — незмінний архів, який однаково запускається на ноутбуці, у CI і на продакшені. Немає «у мене працює» — є «в образі працює», і образ один для всіх.</p>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Контейнери — це не лише про «однаково всюди». Вони зробили можливим сучасний деплой: сервер не знає нічого про Node чи Python, він знає лише «запусти образ X». Тому один і той самий сервер може крутити Node-API, Python-воркер і Go-сервіс, не конфліктуючи версіями. А оркестратори (Compose, Kubernetes) можуть перезапускати, масштабувати і переносити контейнери між машинами, бо контейнер — це самодостатня одиниця.</p>
+</div>
+
+<h2 id="s2">2. Віртуальна машина проти контейнера</h2>
+<p>До контейнерів ізоляцію давали віртуальні машини (virtual machine, VM): гіпервізор емулює «залізо», і в кожній VM працює повноцінна операційна система зі своїм ядром. Це надійно, але важко: кожна VM важить гігабайти і стартує хвилину.</p>
+<p>Контейнер — це не окрема ОС, а ізольований процес на спільному ядрі хоста. Ізоляцію дають механізми ядра Linux: простори імен (namespaces) — процес бачить лише свої файли, мережу, PID-и; контрольні групи (cgroups) — обмеження CPU і пам'яті. Тому контейнер стартує за мілісекунди і важить лише стільки, скільки його файли.</p>
+
+<figure>
+  <svg viewBox="0 0 720 320" role="img" aria-label="Порівняння шарів віртуальної машини і контейнера">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="180" y="24" text-anchor="middle" class="bold">Віртуальні машини</text>
+    <rect x="40" y="260" width="280" height="40" rx="8" class="box-fill"/>
+    <text x="180" y="285" text-anchor="middle">Залізо (сервер)</text>
+    <rect x="40" y="215" width="280" height="40" rx="8" class="purple"/>
+    <text x="180" y="240" text-anchor="middle">Гіпервізор (VMware, KVM)</text>
+    <rect x="40" y="130" width="130" height="80" rx="8" class="red"/>
+    <text x="105" y="152" text-anchor="middle" class="small">Гостьова ОС</text>
+    <text x="105" y="170" text-anchor="middle" class="small">+ ядро (ГБ)</text>
+    <text x="105" y="195" text-anchor="middle" class="small">бібліотеки</text>
+    <rect x="190" y="130" width="130" height="80" rx="8" class="red"/>
+    <text x="255" y="152" text-anchor="middle" class="small">Гостьова ОС</text>
+    <text x="255" y="170" text-anchor="middle" class="small">+ ядро (ГБ)</text>
+    <text x="255" y="195" text-anchor="middle" class="small">бібліотеки</text>
+    <rect x="40" y="60" width="130" height="60" rx="8" class="blue"/>
+    <text x="105" y="95" text-anchor="middle">App A</text>
+    <rect x="190" y="60" width="130" height="60" rx="8" class="blue"/>
+    <text x="255" y="95" text-anchor="middle">App B</text>
+
+    <text x="540" y="24" text-anchor="middle" class="bold">Контейнери</text>
+    <rect x="400" y="260" width="280" height="40" rx="8" class="box-fill"/>
+    <text x="540" y="285" text-anchor="middle">Залізо (сервер)</text>
+    <rect x="400" y="215" width="280" height="40" rx="8" class="purple"/>
+    <text x="540" y="240" text-anchor="middle">ОС хоста + одне ядро Linux</text>
+    <rect x="400" y="170" width="280" height="40" rx="8" class="accent"/>
+    <text x="540" y="195" text-anchor="middle">Docker Engine (containerd, runc)</text>
+    <rect x="400" y="60" width="85" height="100" rx="8" class="green"/>
+    <text x="442" y="95" text-anchor="middle" class="small">App A</text>
+    <text x="442" y="115" text-anchor="middle" class="small">+ libs</text>
+    <text x="442" y="140" text-anchor="middle" class="muted">МБ</text>
+    <rect x="497" y="60" width="85" height="100" rx="8" class="green"/>
+    <text x="539" y="95" text-anchor="middle" class="small">App B</text>
+    <text x="539" y="115" text-anchor="middle" class="small">+ libs</text>
+    <text x="539" y="140" text-anchor="middle" class="muted">МБ</text>
+    <rect x="594" y="60" width="86" height="100" rx="8" class="green"/>
+    <text x="637" y="95" text-anchor="middle" class="small">App C</text>
+    <text x="637" y="115" text-anchor="middle" class="small">+ libs</text>
+    <text x="637" y="140" text-anchor="middle" class="muted">МБ</text>
+    <path d="M330 160 L390 160" class="arrow"/>
+    <text x="360" y="148" text-anchor="middle" class="muted">легше</text>
+  </svg>
+  <figcaption>VM тягне за собою цілу ОС з ядром на кожен застосунок. Контейнери ділять ядро хоста і несуть лише свої файли — тому стартують за мілісекунди.</figcaption>
+</figure>
+
+<p>Це не означає, що VM мертві: хмарні провайдери запускають ваші контейнери <em>всередині</em> VM для безпечної ізоляції між клієнтами. На macOS і Windows Docker Desktop також запускає невелику Linux-VM, у якій живуть усі контейнери. Але для розробника одиницею роботи став контейнер.</p>
+
+<h2 id="s3">3. Docker: образ, контейнер, шари, Dockerfile</h2>
+<p><strong>Образ (image)</strong> — це рецепт плюс усі інгредієнти: файлова система, зібрана шар за шаром, і метадані (яку команду запускати, які порти відкривати). Образ незмінний. <strong>Контейнер (container)</strong> — запущений екземпляр образу: страва, приготована за рецептом. З одного образу можна запустити десять контейнерів, і кожен матиме свою тонку «записувану» плівку поверх спільних шарів образу.</p>
+
+<figure>
+  <svg viewBox="0 0 720 320" role="img" aria-label="Шари Docker-образу і контейнера">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="60" y="250" width="380" height="44" rx="8" class="purple"/>
+    <text x="250" y="277" text-anchor="middle" class="mono">FROM node:22-alpine — базовий шар (ОС + Node)</text>
+    <rect x="60" y="202" width="380" height="44" rx="8" class="blue"/>
+    <text x="250" y="229" text-anchor="middle" class="mono">COPY package.json pnpm-lock.yaml — шар 2</text>
+    <rect x="60" y="154" width="380" height="44" rx="8" class="blue"/>
+    <text x="250" y="181" text-anchor="middle" class="mono">RUN pnpm install — шар 3 (node_modules)</text>
+    <rect x="60" y="106" width="380" height="44" rx="8" class="blue"/>
+    <text x="250" y="133" text-anchor="middle" class="mono">COPY . . — шар 4 (ваш код)</text>
+    <rect x="60" y="40" width="380" height="44" rx="8" class="green" stroke-dasharray="6 4"/>
+    <text x="250" y="67" text-anchor="middle">Записуваний шар контейнера (логи, tmp)</text>
+    <path d="M470 280 L470 110" class="arrow"/>
+    <text x="500" y="200" text-anchor="start" class="small">образ: незмінні</text>
+    <text x="500" y="218" text-anchor="start" class="small">шари, кешуються</text>
+    <text x="500" y="236" text-anchor="start" class="small">і перевикористовуються</text>
+    <path d="M470 62 L520 62" class="arrow"/>
+    <text x="530" y="58" text-anchor="start" class="small">контейнер: тільки</text>
+    <text x="530" y="76" text-anchor="start" class="small">цей шар унікальний</text>
+    <text x="250" y="24" text-anchor="middle" class="muted">↑ зміна у файлі коду перебудовує лише шар 4 і вище</text>
+  </svg>
+  <figcaption>Кожна інструкція Dockerfile створює шар. Якщо шар не змінився, Docker бере його з кешу — тому залежності копіюють до коду.</figcaption>
+</figure>
+
+<p>Кожна інструкція у Dockerfile створює новий шар (layer) — різницю у файловій системі відносно попереднього. Шари кешуються: якщо інструкція і її вхідні дані не змінилися, Docker бере готовий шар. Звідси головне правило порядку: те, що змінюється рідко (базовий образ, залежності), кладемо вгору; те, що змінюється часто (код), — вниз. Тоді правка в одному файлі не змушує переустановлювати <code>node_modules</code>.</p>
+
+<pre><code class="language-dockerfile"># Dockerfile — багатоетапна збірка (multi-stage build) для Node-застосунку
+
+# ---------- Етап 1: збірка ----------
+# Alpine — мінімальний Linux (~5 МБ). Пінимо мажорну версію Node.
+FROM node:22-alpine AS builder
+
+# Усі подальші команди виконуються в цій теці всередині образу
+WORKDIR /app
+
+# Вмикаємо pnpm через corepack (вбудований у Node) — без окремої установки
+RUN corepack enable
+
+# Спочатку ТІЛЬКИ файли залежностей — щоб шар з node_modules кешувався,
+# поки package.json / lock-файл не змінилися
+COPY package.json pnpm-lock.yaml ./
+
+# --frozen-lockfile: падати, якщо lock не збігається з package.json (як у CI)
+RUN pnpm install --frozen-lockfile
+
+# Тепер решта коду (див. .dockerignore — node_modules і .git сюди не потраплять)
+COPY . .
+
+# Компілюємо TypeScript → dist/
+RUN pnpm build
+
+# Прибираємо dev-залежності: у runtime нам потрібні лише production
+RUN pnpm prune --prod
+
+# ---------- Етап 2: runtime ----------
+# Чистий образ: без tsc, vitest, eslint — менший розмір, менша поверхня атаки
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+# Не запускаємо процес від root: якщо застосунок зламають, шкода обмежена.
+# Образ node вже містить користувача "node" з uid 1000.
+USER node
+
+# Копіюємо з етапу builder тільки те, що потрібно для запуску.
+# --chown робить файли власністю користувача node.
+COPY --chown=node:node --from=builder /app/node_modules ./node_modules
+COPY --chown=node:node --from=builder /app/dist ./dist
+COPY --chown=node:node --from=builder /app/package.json ./
+
+# Змінні середовища за замовчуванням (можна перевизначити при запуску)
+ENV NODE_ENV=production PORT=3000
+
+# Документує, який порт слухає застосунок (нічого не «відкриває» сам по собі)
+EXPOSE 3000
+
+# Docker перевіряє здоров'я контейнера кожні 30 с через наш /health
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+# Exec-форма (масив) — процес node стає PID 1 і отримує сигнали напряму
+CMD ["node", "dist/server.js"]</code></pre>
+
+<pre><code class="language-text"># .dockerignore — що НЕ копіювати в образ (як .gitignore для docker build)
+node_modules
+dist
+.git
+.env
+.env.*
+coverage
+*.md
+.vscode
+Dockerfile
+compose*.yaml</code></pre>
+
+<p>Чому це важливо: без <code>.dockerignore</code> команда <code>COPY . .</code> затягне локальні <code>node_modules</code> (можливо, зібрані під macOS — і не сумісні з Alpine Linux), файл <code>.env</code> з секретами і всю історію git. Образ роздується, а секрети опиняться в реєстрі.</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><strong>Shell-форма <code>CMD node dist/server.js</code></strong> запускає <code>/bin/sh -c "node ..."</code>: PID 1 — це shell, він не передає SIGTERM дочірньому node, і контейнер зупиняється «жорстко» через 10 с. Завжди використовуйте масив.</li>
+    <li><strong>Alpine і native-модулі.</strong> Alpine використовує musl замість glibc; пакети з нативними бінарниками (sharp, bcrypt, prisma) іноді не мають musl-збірки. Тоді беріть <code>node:22-bookworm-slim</code>.</li>
+    <li><strong><code>COPY . .</code> перед <code>pnpm install</code></strong> — вбиває кеш: будь-яка зміна коду переустановлює всі залежності.</li>
+  </ul>
+</div>
+
+<h2 id="s4">4. Команди, томи, мережі, реєстри</h2>
+<pre><code class="language-bash"># Зібрати образ з Dockerfile у поточній теці, дати тег (ім'я:версія)
+docker build -t notes-api:1.0.0 .
+
+# Запустити контейнер: -d у фоні, -p хост:контейнер, --name для зручності,
+# -e змінна середовища, --rm видалити після зупинки
+docker run -d --name notes -p 3000:3000 -e DATABASE_URL=postgres://... notes-api:1.0.0
+
+docker ps                    # запущені контейнери
+docker logs -f notes         # логи в реальному часі (stdout/stderr контейнера)
+docker exec -it notes sh     # зайти всередину працюючого контейнера
+docker stop notes            # SIGTERM, через 10 с — SIGKILL
+docker rm notes              # видалити зупинений контейнер
+docker image ls              # локальні образи
+docker system prune          # прибрати зупинені контейнери, невикористані образи і кеш</code></pre>
+
+<h3>Томи (volumes)</h3>
+<p>Файлова система контейнера зникає разом із ним. Для даних, які мають пережити перезапуск (база даних, завантажені файли), використовують томи: Docker зберігає їх окремо і монтує в контейнер. Є два види: <strong>іменовані томи</strong> (<code>-v pgdata:/var/lib/postgresql/data</code>) — Docker керує ними сам, це правильний вибір для продакшену; і <strong>bind mount</strong> (<code>-v ./src:/app/src</code>) — пряме прокидання теки з хоста, зручно для розробки з гарячим перезавантаженням.</p>
+
+<h3>Мережі (networks)</h3>
+<p>Кожен контейнер має власний мережевий стек. Контейнери в одній користувацькій мережі бачать один одного за іменем: контейнер <code>app</code> підключається до <code>postgres://db:5432</code>, де <code>db</code> — ім'я контейнера, яке Docker резолвить через вбудований DNS. Порт <code>-p 3000:3000</code> пробиває отвір із хоста в контейнер; без нього ззовні контейнер недоступний — і для бази даних це саме те, що треба.</p>
+
+<h3>Реєстри (registries)</h3>
+<p>Реєстр — це «GitHub для образів»: сховище, куди ви <code>push</code>-ите образ із CI, а сервер <code>pull</code>-ить його. Docker Hub — публічний за замовчуванням (звідти беруться <code>node</code>, <code>postgres</code>). GitHub Container Registry (GHCR, <code>ghcr.io/user/repo</code>) — зручний, бо живе поруч із кодом і має вбудовану автентифікацію в Actions. Хмарні: AWS ECR, Google Artifact Registry.</p>
+
+<pre><code class="language-bash"># Тег з адресою реєстру — і push
+docker tag notes-api:1.0.0 ghcr.io/olya/notes-api:1.0.0
+docker login ghcr.io -u olya          # токен з правами write:packages
+docker push ghcr.io/olya/notes-api:1.0.0
+
+# На сервері
+docker pull ghcr.io/olya/notes-api:1.0.0</code></pre>
+
+<h2 id="s5">5. Docker Compose: app + Postgres + Redis</h2>
+<p>Реальний застосунок — це кілька контейнерів: API, база, кеш, можливо воркер. Запускати їх вручну п'ятьма командами <code>docker run</code> з правильними мережами — мука. Docker Compose описує всю зв'язку в одному файлі і піднімає її однією командою.</p>
+
+<pre><code class="language-yaml"># compose.yaml (Compose v2 більше не потребує поля "version")
+services:
+  app:
+    build: .                          # збирати з Dockerfile у поточній теці
+    image: ghcr.io/olya/notes-api     # ім'я, під яким зберегти зібраний образ
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Хост "db" — ім'я сервісу нижче; Compose створює мережу і DNS сам
+      DATABASE_URL: postgres://notes:${POSTGRES_PASSWORD}@db:5432/notes
+      REDIS_URL: redis://cache:6379
+    env_file: .env                    # додаткові змінні з файлу (не комітити!)
+    depends_on:
+      db:
+        condition: service_healthy    # чекати не просто старту, а готовності
+      cache:
+        condition: service_started
+    restart: unless-stopped           # підняти після падіння або перезавантаження хоста
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }   # cgroups: не дати з'їсти весь сервер
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: notes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}   # береться з .env або оточення
+      POSTGRES_DB: notes
+    volumes:
+      - pgdata:/var/lib/postgresql/data          # дані переживуть перезапуск
+      - ./db/init:/docker-entrypoint-initdb.d:ro # SQL-скрипти при першому старті
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notes -d notes"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Порт НЕ публікуємо: база доступна лише всередині Compose-мережі
+
+  cache:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:</code></pre>
+
+<pre><code class="language-bash">docker compose up -d --build     # зібрати і підняти все у фоні
+docker compose ps                # стан сервісів + healthy/unhealthy
+docker compose logs -f app       # логи одного сервісу
+docker compose exec db psql -U notes   # консоль Postgres
+docker compose down              # зупинити і видалити контейнери (томи лишаються)
+docker compose down -v           # ...і томи теж (дані зникнуть!)</code></pre>
+
+<p>Ключові моменти: <code>depends_on</code> з <code>condition: service_healthy</code> — без цього <code>app</code> стартує, поки Postgres ще ініціалізується, і падає з «connection refused». <code>healthcheck</code> визначає, що означає «здоровий» для кожного сервісу. Порт бази не публікується назовні — це і безпека, і відсутність конфліктів з локальним Postgres. Для розробки часто тримають окремий <code>compose.override.yaml</code>, який Compose підхоплює автоматично: там bind-mount коду, команда <code>pnpm dev</code> і опублікований порт бази для DBeaver.</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Візьміть API нотаток з розділу 04, додайте <code>Dockerfile</code> і <code>.dockerignore</code> з цього розділу. Зберіть образ і подивіться його розмір через <code>docker image ls</code>. Потім приберіть multi-stage (усе в одному етапі) і порівняйте — різниця буде у сотні мегабайт.</li>
+    <li>Напишіть <code>compose.yaml</code> з app + db. Запустіть, створіть нотатку через curl, виконайте <code>docker compose down</code> і <code>up</code> — нотатка має залишитися (том). Тепер <code>down -v</code> — нотатка зникне.</li>
+    <li>Змініть один рядок у коді і перезберіть. У виводі <code>docker build</code> знайдіть рядки <code>CACHED</code> — переконайтеся, що <code>pnpm install</code> не запускався знову.</li>
+    <li>Зайдіть у контейнер (<code>docker compose exec app sh</code>) і виконайте <code>whoami</code> — має бути <code>node</code>, не <code>root</code>.</li>
+  </ol>
+</div>
+
+<h2 id="s6">6. 12-factor, конфігурація і секрети</h2>
+<p>«The Twelve-Factor App» — маніфест від творців Heroku (2011), який досі є базовим чек-листом для застосунків, що деплояться у хмару. Найважливіші пункти для нас:</p>
+<ul>
+  <li><strong>Codebase</strong> — один репозиторій, багато деплоїв (dev, staging, prod) з одного коду.</li>
+  <li><strong>Dependencies</strong> — усі залежності явно оголошені (<code>package.json</code> + lock), нічого «встановленого на сервері».</li>
+  <li><strong>Config</strong> — конфігурація, яка відрізняється між середовищами (URL бази, ключі), живе у змінних середовища, а не в коді. Один образ — різні env.</li>
+  <li><strong>Backing services</strong> — база, кеш, пошта — це приєднані ресурси, які підмінюються через конфіг без зміни коду.</li>
+  <li><strong>Build, release, run</strong> — три окремі етапи: збірка образу, поєднання з конфігом, запуск. Не можна змінювати код у runtime.</li>
+  <li><strong>Processes</strong> — застосунок не зберігає стан у пам'яті чи на диску між запитами (stateless); сесії — у Redis, файли — в object storage. Тоді можна запускати N копій.</li>
+  <li><strong>Port binding</strong> — застосунок сам слухає порт, а не покладається на зовнішній сервер застосунків.</li>
+  <li><strong>Disposability</strong> — швидкий старт, коректна зупинка за SIGTERM (див. graceful shutdown нижче).</li>
+  <li><strong>Dev/prod parity</strong> — розробка максимально схожа на продакшн: та сама база (Postgres, а не SQLite «для зручності»), той самий образ.</li>
+  <li><strong>Logs</strong> — писати в stdout, а не у файли; збиранням займається платформа.</li>
+</ul>
+
+<h3>Секрети</h3>
+<p>Пароль бази, ключ Stripe, JWT-секрет — це секрети (secrets). Правила: ніколи не в git, ніколи не в Dockerfile (<code>ENV SECRET=...</code> залишається в шарі образу назавжди — його можна витягти через <code>docker history</code>), ніколи не в аргументах збірки. Куди можна: змінні середовища, які підставляє платформа (GitHub Secrets → env у workflow; Vercel/Fly/Railway мають свої сховища), Docker secrets або файли, змонтовані в <code>/run/secrets/</code>, менеджери секретів (AWS Secrets Manager, HashiCorp Vault, Doppler, 1Password CLI). Локально — <code>.env</code> у <code>.gitignore</code> плюс <code>.env.example</code> без значень у репозиторії, щоб колеги знали, які змінні потрібні.</p>
+
+<pre><code class="language-ts">// src/config.ts — валідуємо змінні середовища при старті, а не при першому запиті
+import { z } from "zod";
+
+const schema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  PORT: z.coerce.number().int().positive().default(3000),
+  DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url(),
+  JWT_SECRET: z.string().min(32, "JWT_SECRET має бути хоча б 32 символи"),
+});
+
+// Якщо чогось бракує — застосунок падає одразу з чітким повідомленням,
+// а не через годину з "undefined is not a valid connection string"
+export const config = schema.parse(process.env);</code></pre>
+
+<h2 id="s7">7. CI/CD і GitHub Actions</h2>
+<p><strong>Безперервна інтеграція (Continuous Integration, CI)</strong> — на кожен push автоматично запускаються перевірки: лінтер, типи, тести, збірка. Мета — ловити проблеми за хвилини, а не в день релізу. <strong>Безперервна доставка/розгортання (Continuous Delivery / Deployment, CD)</strong> — якщо перевірки зелені, зібраний артефакт автоматично (або одним кліком) потрапляє на сервер. Delivery — готово до деплою, Deployment — задеплоєно без участі людини.</p>
+
+<figure>
+  <svg viewBox="0 0 720 240" role="img" aria-label="Конвеєр CI/CD від push до деплою">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="70" width="100" height="70" rx="12" class="accent"/>
+    <text x="60" y="100" text-anchor="middle" class="bold">git push</text>
+    <text x="60" y="122" text-anchor="middle" class="muted">розробник</text>
+    <path d="M110 105 L150 105" class="arrow"/>
+    <rect x="150" y="70" width="100" height="70" rx="12" class="blue"/>
+    <text x="200" y="100" text-anchor="middle" class="bold">Lint + tsc</text>
+    <text x="200" y="122" text-anchor="middle" class="muted">~30 с</text>
+    <path d="M250 105 L290 105" class="arrow"/>
+    <rect x="290" y="70" width="100" height="70" rx="12" class="blue"/>
+    <text x="340" y="100" text-anchor="middle" class="bold">Тести</text>
+    <text x="340" y="122" text-anchor="middle" class="muted">~2 хв</text>
+    <path d="M390 105 L430 105" class="arrow"/>
+    <rect x="430" y="70" width="100" height="70" rx="12" class="purple"/>
+    <text x="480" y="100" text-anchor="middle" class="bold">Build image</text>
+    <text x="480" y="122" text-anchor="middle" class="muted">push у GHCR</text>
+    <path d="M530 105 L570 105" class="arrow"/>
+    <rect x="570" y="70" width="140" height="70" rx="12" class="green"/>
+    <text x="640" y="100" text-anchor="middle" class="bold">Deploy</text>
+    <text x="640" y="122" text-anchor="middle" class="muted">лише з main</text>
+    <path d="M200 140 L200 190" class="arrow dashed"/>
+    <path d="M340 140 L340 190" class="arrow dashed"/>
+    <rect x="130" y="190" width="280" height="36" rx="8" class="red"/>
+    <text x="270" y="213" text-anchor="middle" class="small">червоний → PR заблоковано, деплою немає</text>
+    <text x="360" y="40" text-anchor="middle" class="muted">CI (перевірка кожного PR)</text>
+    <text x="600" y="40" text-anchor="middle" class="muted">CD (тільки main)</text>
+    <line x1="140" y1="52" x2="540" y2="52" class="arrow" style="opacity:.3"/>
+    <line x1="565" y1="52" x2="715" y2="52" class="arrow" style="opacity:.3"/>
+  </svg>
+  <figcaption>Конвеєр: швидкі перевірки спершу, дорогі потім; збірка образу і деплой — лише після зелених тестів і лише з головної гілки.</figcaption>
+</figure>
+
+<pre><code class="language-yaml"># .github/workflows/ci-cd.yml
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Права токена GITHUB_TOKEN — мінімально необхідні
+permissions:
+  contents: read
+  packages: write        # для push у GHCR
+
+# Якщо запушили двічі поспіль — скасувати попередній прогін тієї ж гілки
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}   # ghcr.io/olya/notes-api
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]                        # перевіряємо на двох версіях Node
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: test, POSTGRES_DB: notes_test }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm                         # кеш pnpm store між прогонами
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm tsc --noEmit
+      - run: pnpm vitest run
+        env:
+          DATABASE_URL: postgres://postgres:test@localhost:5432/notes_test
+
+  build:
+    needs: check                              # лише після зелених перевірок
+    if: github.ref == 'refs/heads/main'      # образи збираємо тільки з main
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3   # buildx: кеш шарів, multi-platform
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5       # генерує теги: sha-abc1234, latest
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha                 # кеш шарів у GitHub Actions cache
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production                   # захищене середовище: секрети + approve
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /srv/notes
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            export IMAGE_TAG=sha-${GITHUB_SHA::7}
+            docker compose pull app
+            docker compose up -d app          # rolling для одного контейнера: новий підніметься, старий зупиниться
+            docker image prune -f</code></pre>
+
+<p>Що тут відбувається: три джоби, послідовні через <code>needs</code>. <code>check</code> запускається на кожен PR і на push у main, у матриці з двох версій Node, з Postgres як сервісом. <code>build</code> — тільки з main: логін у GHCR через вбудований <code>GITHUB_TOKEN</code>, тег за SHA коміту (щоб кожен образ був унікальний і відтворюваний) плюс <code>latest</code> для зручності, кеш шарів між прогонами. <code>deploy</code> — по SSH на сервер, де лежить <code>compose.yaml</code>, який читає <code>IMAGE_TAG</code> з оточення: <code>image: ghcr.io/olya/notes-api:${IMAGE_TAG:-latest}</code>.</p>
+
+<div class="box why">
+  <div class="title">Чому тег за SHA, а не тільки latest</div>
+  <p><code>latest</code> — рухома мітка: сьогодні вона вказує на одну збірку, завтра на іншу. Якщо продакшн зламався, ви не знаєте, що саме там крутиться, і не можете відкотитися на «попередній latest» — його вже немає. Тег <code>sha-abc1234</code> назавжди прив'язаний до коміту: <code>docker compose up</code> з попереднім SHA — і ви відкотилися за 20 секунд. Те саме стосується базових образів: <code>FROM node:22-alpine</code> краще за <code>FROM node:latest</code>.</p>
+</div>
+
+<h2 id="s8">8. Стратегії деплою</h2>
+<p>Деплой — це заміна старої версії на нову. Питання в тому, чи буде простій (downtime) і що робити, якщо нова версія погана.</p>
+
+<figure>
+  <svg viewBox="0 0 720 360" role="img" aria-label="Стратегії деплою: recreate, rolling, blue-green, canary">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="90" y="28" text-anchor="middle" class="bold">Recreate</text>
+    <rect x="20" y="40" width="40" height="30" rx="6" class="blue"/><rect x="65" y="40" width="40" height="30" rx="6" class="blue"/><rect x="110" y="40" width="40" height="30" rx="6" class="blue"/>
+    <text x="90" y="88" text-anchor="middle" class="muted">v1 v1 v1</text>
+    <path d="M90 95 L90 118" class="arrow"/>
+    <rect x="20" y="120" width="130" height="24" rx="6" class="red"/>
+    <text x="85" y="137" text-anchor="middle" class="small">простій</text>
+    <path d="M90 148 L90 168" class="arrow"/>
+    <rect x="20" y="172" width="40" height="30" rx="6" class="green"/><rect x="65" y="172" width="40" height="30" rx="6" class="green"/><rect x="110" y="172" width="40" height="30" rx="6" class="green"/>
+    <text x="90" y="220" text-anchor="middle" class="muted">v2 v2 v2</text>
+
+    <text x="270" y="28" text-anchor="middle" class="bold">Rolling</text>
+    <rect x="200" y="40" width="40" height="30" rx="6" class="blue"/><rect x="245" y="40" width="40" height="30" rx="6" class="blue"/><rect x="290" y="40" width="40" height="30" rx="6" class="blue"/>
+    <path d="M270 78 L270 98" class="arrow"/>
+    <rect x="200" y="100" width="40" height="30" rx="6" class="green"/><rect x="245" y="100" width="40" height="30" rx="6" class="blue"/><rect x="290" y="100" width="40" height="30" rx="6" class="blue"/>
+    <path d="M270 138 L270 158" class="arrow"/>
+    <rect x="200" y="160" width="40" height="30" rx="6" class="green"/><rect x="245" y="160" width="40" height="30" rx="6" class="green"/><rect x="290" y="160" width="40" height="30" rx="6" class="blue"/>
+    <path d="M270 198 L270 218" class="arrow"/>
+    <rect x="200" y="220" width="40" height="30" rx="6" class="green"/><rect x="245" y="220" width="40" height="30" rx="6" class="green"/><rect x="290" y="220" width="40" height="30" rx="6" class="green"/>
+    <text x="270" y="272" text-anchor="middle" class="muted">по одному, без простою</text>
+    <text x="270" y="290" text-anchor="middle" class="muted">v1 і v2 живуть разом</text>
+
+    <text x="450" y="28" text-anchor="middle" class="bold">Blue-Green</text>
+    <rect x="380" y="40" width="60" height="70" rx="8" class="blue"/>
+    <text x="410" y="70" text-anchor="middle" class="small">Blue</text>
+    <text x="410" y="88" text-anchor="middle" class="small">v1</text>
+    <rect x="460" y="40" width="60" height="70" rx="8" class="green"/>
+    <text x="490" y="70" text-anchor="middle" class="small">Green</text>
+    <text x="490" y="88" text-anchor="middle" class="small">v2</text>
+    <rect x="395" y="150" width="110" height="34" rx="8" class="accent"/>
+    <text x="450" y="172" text-anchor="middle" class="small">балансувальник</text>
+    <path d="M430 150 L412 112" class="arrow"/>
+    <path d="M470 150 L488 112" class="arrow dashed"/>
+    <text x="450" y="210" text-anchor="middle" class="muted">перемкнути трафік</text>
+    <text x="450" y="228" text-anchor="middle" class="muted">одним рухом; відкат —</text>
+    <text x="450" y="246" text-anchor="middle" class="muted">перемкнути назад</text>
+    <text x="450" y="272" text-anchor="middle" class="muted">ціна: ×2 ресурсів</text>
+
+    <text x="630" y="28" text-anchor="middle" class="bold">Canary</text>
+    <rect x="560" y="40" width="40" height="30" rx="6" class="blue"/><rect x="605" y="40" width="40" height="30" rx="6" class="blue"/><rect x="650" y="40" width="40" height="30" rx="6" class="green"/>
+    <text x="580" y="90" text-anchor="middle" class="small">95 %</text>
+    <text x="670" y="90" text-anchor="middle" class="small">5 %</text>
+    <rect x="575" y="110" width="110" height="34" rx="8" class="accent"/>
+    <text x="630" y="132" text-anchor="middle" class="small">балансувальник</text>
+    <path d="M600 110 L585 76" class="arrow"/>
+    <path d="M660 110 L668 76" class="arrow"/>
+    <text x="630" y="175" text-anchor="middle" class="muted">v2 отримує 5 % трафіку</text>
+    <text x="630" y="193" text-anchor="middle" class="muted">дивимося на помилки/латентність</text>
+    <text x="630" y="211" text-anchor="middle" class="muted">ОК → 25 % → 50 % → 100 %</text>
+    <text x="630" y="229" text-anchor="middle" class="muted">погано → відкат, 95 %</text>
+    <text x="630" y="247" text-anchor="middle" class="muted">користувачів не постраждали</text>
+    <text x="360" y="340" text-anchor="middle" class="muted">Синій = стара версія, зелений = нова. Стрілки від балансувальника — куди йде трафік.</text>
+  </svg>
+  <figcaption>Чотири стратегії: від найпростішої з простоєм до канарейкової з поступовим перемиканням трафіку і спостереженням за метриками.</figcaption>
+</figure>
+
+<ul>
+  <li><strong>Recreate</strong> — зупинити стару, запустити нову. Простій на секунди-хвилини. Годиться для внутрішніх інструментів і застосунків, де короткий простій прийнятний. Найпростіша, і саме так працює <code>docker compose up</code> для одного контейнера, якщо не старатися.</li>
+  <li><strong>Rolling</strong> — замінювати екземпляри по одному: підняти новий, дочекатися healthcheck, зняти старий. Без простою, але певний час працюють дві версії одночасно — API і схема бази мають бути сумісні з обома (це називають backward-compatible міграціями). Стандарт для Kubernetes.</li>
+  <li><strong>Blue-Green</strong> — два однакові середовища. Нова версія розгортається у неактивне (green), тестується, потім балансувальник перемикає весь трафік. Відкат — перемкнути назад. Ціна — вдвічі більше ресурсів у момент деплою. Описано Мартіном Фаулером у 2010-му.</li>
+  <li><strong>Canary</strong> — нова версія отримує маленьку частку трафіку (1–5 %), і ви дивитеся на метрики: помилки, латентність, бізнес-показники. Якщо все гаразд — частку збільшують. Назва від канарок, яких шахтарі брали під землю: птах непритомнів від газу раніше за людей. Потребує балансувальника з ваговим маршрутизуванням і хорошого моніторингу.</li>
+</ul>
+
+<h2 id="s9">9. Куди деплоїти: PaaS, VPS, хмара</h2>
+<h3>PaaS — платформа як сервіс</h3>
+<p>Vercel, Railway, Fly.io, Render беруть на себе все: ви даєте репозиторій або Dockerfile, вони збирають, деплоять, дають HTTPS-домен, логи, автоскейл. Ідеально для старту і для команд без DevOps. <strong>Vercel</strong> — рідний дім Next.js, serverless-функції, edge, безкоштовний хобі-план; але бекенд з довгими з'єднаннями (WebSocket) або воркерами туди не покладеш. <strong>Fly.io</strong> — запускає ваш Docker-образ на мікро-VM у регіонах по всьому світу, є Postgres і Redis. <strong>Railway</strong> і <strong>Render</strong> — «Heroku нового покоління»: підключив репозиторій, обрав базу з каталогу, готово. Мінус усіх PaaS — ціна зростає швидше, ніж на VPS, і менше контролю.</p>
+
+<h3>VPS — власний віртуальний сервер</h3>
+<p>Hetzner, DigitalOcean, Vultr дають Linux-машину за 4–10 € на місяць. На ній: Docker, ваш <code>compose.yaml</code> і зворотний проксі (reverse proxy), який приймає HTTPS на 443 порту і перенаправляє запити до контейнерів. Це найдешевший варіант для невеликих проєктів і найкращий спосіб зрозуміти, як усе працює.</p>
+
+<figure>
+  <svg viewBox="0 0 720 280" role="img" aria-label="VPS з reverse proxy Caddy перед контейнерами">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="100" width="120" height="70" rx="12" class="blue"/>
+    <text x="80" y="130" text-anchor="middle" class="bold">Браузер</text>
+    <text x="80" y="152" text-anchor="middle" class="mono">https://notes.app</text>
+    <path d="M140 135 L210 135" class="arrow"/>
+    <text x="175" y="122" text-anchor="middle" class="mono">:443</text>
+    <rect x="210" y="20" width="490" height="240" rx="16" class="box-fill" stroke-dasharray="6 4"/>
+    <text x="455" y="44" text-anchor="middle" class="muted">VPS (Hetzner, 4 €/міс) · Docker Compose</text>
+    <rect x="230" y="95" width="150" height="80" rx="12" class="accent"/>
+    <text x="305" y="122" text-anchor="middle" class="bold">Caddy</text>
+    <text x="305" y="142" text-anchor="middle" class="small">reverse proxy</text>
+    <text x="305" y="160" text-anchor="middle" class="small">TLS від Let's Encrypt</text>
+    <path d="M380 120 L450 80" class="arrow"/>
+    <text x="420" y="88" text-anchor="middle" class="mono">/api/* → app:3000</text>
+    <path d="M380 150 L450 190" class="arrow"/>
+    <text x="420" y="190" text-anchor="middle" class="mono">/* → web:80</text>
+    <rect x="450" y="55" width="110" height="50" rx="10" class="green"/>
+    <text x="505" y="85" text-anchor="middle">app (API)</text>
+    <rect x="450" y="175" width="110" height="50" rx="10" class="green"/>
+    <text x="505" y="205" text-anchor="middle">web (Next)</text>
+    <path d="M560 80 L600 80" class="arrow"/>
+    <rect x="600" y="55" width="85" height="50" rx="10" class="purple"/>
+    <text x="642" y="85" text-anchor="middle" class="small">db</text>
+    <path d="M560 200 L600 200" class="arrow dashed"/>
+    <rect x="600" y="175" width="85" height="50" rx="10" class="purple"/>
+    <text x="642" y="205" text-anchor="middle" class="small">cache</text>
+    <text x="455" y="248" text-anchor="middle" class="muted">назовні відкритий лише порт 443 (і 80 для редиректу); решта — внутрішня мережа</text>
+  </svg>
+  <figcaption>Зворотний проксі — єдині «вхідні двері»: термінує HTTPS, маршрутизує за шляхом чи доменом, а контейнери не мають публічних портів.</figcaption>
+</figure>
+
+<p><strong>Caddy</strong> — проксі, який сам отримує і оновлює сертифікати Let's Encrypt. Конфіг на п'ять рядків:</p>
+<pre><code class="language-text"># Caddyfile
+notes.app {
+    # Автоматичний HTTPS: Caddy отримає сертифікат від Let's Encrypt через ACME-челендж
+    encode gzip zstd
+    handle /api/* {
+        reverse_proxy app:3000        # ім'я сервісу з compose.yaml
+    }
+    handle {
+        reverse_proxy web:3000
+    }
+}</code></pre>
+
+<pre><code class="language-yaml"># Додаємо до compose.yaml
+services:
+  proxy:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data           # сертифікати мають пережити перезапуск
+    depends_on: [app, web]
+volumes:
+  caddy_data:</code></pre>
+
+<p>Той самий результат на <strong>nginx</strong> вимагає більше рядків і окремого certbot для сертифікатів, але nginx — індустріальний стандарт, і його конфіги ви зустрінете всюди:</p>
+<pre><code class="language-nginx"># nginx.conf (фрагмент server-блоку); сертифікати отримує certbot
+server {
+    listen 443 ssl http2;
+    server_name notes.app;
+    ssl_certificate     /etc/letsencrypt/live/notes.app/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/notes.app/privkey.pem;
+
+    location /api/ {
+        proxy_pass         http://app:3000;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto https;
+    }
+    location / {
+        proxy_pass http://web:3000;
+    }
+}
+server {                                # HTTP → HTTPS
+    listen 80;
+    server_name notes.app;
+    return 301 https://$host$request_uri;
+}</code></pre>
+
+<h3>Хмара — AWS, GCP, Azure</h3>
+<p>Великі хмари дають сотні сервісів, але для звичайного застосунку потрібні три категорії: обчислення, сховище об'єктів, керована база. Назви відрізняються, суть однакова:</p>
+<div class="table-wrap">
+<table>
+  <tr><th>Що потрібно</th><th>AWS</th><th>Google Cloud</th><th>Azure</th><th>Аналог у малих</th></tr>
+  <tr><td>Віртуальна машина</td><td>EC2</td><td>Compute Engine</td><td>Virtual Machines</td><td>Hetzner Cloud, DO Droplet</td></tr>
+  <tr><td>Запуск контейнера без серверів</td><td>ECS Fargate, App Runner</td><td>Cloud Run</td><td>Container Apps</td><td>Fly.io, Railway</td></tr>
+  <tr><td>Функції (serverless)</td><td>Lambda</td><td>Cloud Functions</td><td>Azure Functions</td><td>Vercel Functions</td></tr>
+  <tr><td>Сховище файлів (object storage)</td><td>S3</td><td>Cloud Storage</td><td>Blob Storage</td><td>Cloudflare R2, Backblaze B2</td></tr>
+  <tr><td>Керований Postgres</td><td>RDS, Aurora</td><td>Cloud SQL</td><td>Database for PostgreSQL</td><td>Neon, Supabase</td></tr>
+  <tr><td>Керований Redis</td><td>ElastiCache</td><td>Memorystore</td><td>Cache for Redis</td><td>Upstash</td></tr>
+  <tr><td>Реєстр образів</td><td>ECR</td><td>Artifact Registry</td><td>Container Registry</td><td>GHCR, Docker Hub</td></tr>
+  <tr><td>CDN</td><td>CloudFront</td><td>Cloud CDN</td><td>Azure CDN</td><td>Cloudflare</td></tr>
+  <tr><td>Kubernetes</td><td>EKS</td><td>GKE</td><td>AKS</td><td>DO Kubernetes, k3s на VPS</td></tr>
+  <tr><td>Секрети</td><td>Secrets Manager</td><td>Secret Manager</td><td>Key Vault</td><td>Doppler, 1Password</td></tr>
+</table>
+</div>
+<p>Коли йти у велику хмару: коли потрібні compliance-сертифікати, регіони по всьому світу, інтеграція з десятками сервісів або команда вже вміє. Для проєкту на старті це майже завжди дорожче і складніше за PaaS чи VPS.</p>
+
+<h2 id="s10">10. Kubernetes: огляд</h2>
+<p>Kubernetes (K8s) — оркестратор контейнерів: система, яка на кластері з багатьох машин запускає потрібну кількість копій кожного сервісу, перезапускає впалі, розподіляє трафік, масштабує під навантаження і робить rolling-деплої. Ви описуєте бажаний стан у YAML, а Kubernetes постійно приводить реальність до нього.</p>
+
+<figure>
+  <svg viewBox="0 0 720 300" role="img" aria-label="Базові об'єкти Kubernetes: Ingress, Service, Deployment, Pod">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="120" width="90" height="60" rx="10" class="blue"/>
+    <text x="65" y="155" text-anchor="middle">Інтернет</text>
+    <path d="M110 150 L160 150" class="arrow"/>
+    <rect x="160" y="20" width="540" height="260" rx="16" class="box-fill" stroke-dasharray="6 4"/>
+    <text x="430" y="42" text-anchor="middle" class="muted">Кластер Kubernetes (кілька нод)</text>
+    <rect x="175" y="120" width="110" height="60" rx="10" class="accent"/>
+    <text x="230" y="145" text-anchor="middle" class="bold">Ingress</text>
+    <text x="230" y="165" text-anchor="middle" class="small">HTTPS, маршрути</text>
+    <path d="M285 150 L335 150" class="arrow"/>
+    <rect x="335" y="120" width="110" height="60" rx="10" class="purple"/>
+    <text x="390" y="145" text-anchor="middle" class="bold">Service</text>
+    <text x="390" y="165" text-anchor="middle" class="small">стабільний IP, LB</text>
+    <path d="M445 140 L500 85" class="arrow"/>
+    <path d="M445 150 L500 150" class="arrow"/>
+    <path d="M445 160 L500 215" class="arrow"/>
+    <rect x="490" y="55" width="200" height="200" rx="12" class="green" style="opacity:.35"/>
+    <text x="590" y="75" text-anchor="middle" class="small">Deployment: replicas: 3</text>
+    <rect x="500" y="85" width="180" height="40" rx="8" class="green"/>
+    <text x="590" y="110" text-anchor="middle" class="mono">Pod · app:sha-abc · нода 1</text>
+    <rect x="500" y="135" width="180" height="40" rx="8" class="green"/>
+    <text x="590" y="160" text-anchor="middle" class="mono">Pod · app:sha-abc · нода 2</text>
+    <rect x="500" y="185" width="180" height="40" rx="8" class="green"/>
+    <text x="590" y="210" text-anchor="middle" class="mono">Pod · app:sha-abc · нода 1</text>
+    <text x="590" y="245" text-anchor="middle" class="small">Pod впав → Deployment створить новий</text>
+    <text x="330" y="230" text-anchor="middle" class="small">ConfigMap / Secret → env у Pod</text>
+    <text x="330" y="250" text-anchor="middle" class="small">HPA: більше Pod при CPU &gt; 70 %</text>
+  </svg>
+  <figcaption>Ingress приймає трафік ззовні → Service балансує на Pod-и → Deployment стежить, щоб Pod-ів завжди було стільки, скільки задано.</figcaption>
+</figure>
+
+<ul>
+  <li><strong>Pod</strong> — найменша одиниця: один або кілька контейнерів, які ділять мережу і диск. Зазвичай один контейнер на Pod. Pod смертний: впав — створюється новий з новим IP.</li>
+  <li><strong>Deployment</strong> — «я хочу 3 Pod-и з образом X». Стежить за кількістю, робить rolling update при зміні образу, зберігає історію для відкату.</li>
+  <li><strong>Service</strong> — стабільна адреса і балансування на набір Pod-ів (бо IP Pod-ів змінюються).</li>
+  <li><strong>Ingress</strong> — правила «домен/шлях → Service», термінація TLS. Реалізується контролером (nginx-ingress, Traefik).</li>
+  <li><strong>ConfigMap / Secret</strong> — конфігурація і секрети, які монтуються у Pod як env або файли.</li>
+  <li><strong>HPA</strong> (Horizontal Pod Autoscaler) — автоматично змінює кількість Pod-ів за метриками.</li>
+</ul>
+<p>Коли Kubernetes потрібен: десятки сервісів, кілька команд, потреба в автоскейлі і самовідновленні, кілька середовищ на одній інфраструктурі. Коли ні: один-три сервіси, маленька команда, немає людини, яка готова його підтримувати. Kubernetes — це не «наступний крок після Compose», це інша вагова категорія з власною операційною складністю. Багато успішних продуктів роками живуть на Compose + VPS або PaaS. Якщо хочеться спробувати — k3s (легкий дистрибутив) на одному VPS або керований кластер у DigitalOcean.</p>
+
+<h2 id="s11">11. Середовища, healthcheck, graceful shutdown</h2>
+<h3>Середовища (environments)</h3>
+<p><strong>dev</strong> — ноутбук розробника, Compose, гарячий перезапуск, тестові дані. <strong>staging</strong> — копія продакшену з тими самими образами і конфігами, але окремою базою: тут тестують перед релізом, сюди автодеплоїться <code>main</code>. <strong>prod</strong> — те, що бачать користувачі; деплой з тегу або через ручне підтвердження (GitHub Environments з required reviewers). Ключове правило: один образ проходить через усі середовища, змінюється лише конфіг. Якщо для prod збирається інший образ — ви тестуєте не те, що деплоїте.</p>
+
+<h3>Health-ендпоінт</h3>
+<pre><code class="language-ts">// src/health.ts — два ендпоінти з різним змістом
+import { Router } from "express";
+import { db } from "./db.js";
+
+export const health = Router();
+
+// liveness: «процес живий?» — якщо ні, оркестратор перезапустить контейнер
+health.get("/health", (_req, res) =&gt; res.json({ status: "ok" }));
+
+// readiness: «готовий приймати трафік?» — перевіряє залежності.
+// Якщо база недоступна — прибрати з балансування, але НЕ перезапускати
+health.get("/ready", async (_req, res) =&gt; {
+  try {
+    await db.execute("SELECT 1");
+    res.json({ status: "ready" });
+  } catch (err) {
+    res.status(503).json({ status: "not ready", reason: "database" });
+  }
+});</code></pre>
+
+<h3>Graceful shutdown</h3>
+<p>Коли оркестратор зупиняє контейнер, він надсилає SIGTERM і дає ~10 секунд (у K8s — 30). Якщо процес просто вмирає, запити, які зараз обробляються, обриваються, а користувачі бачать помилки при кожному деплої. Правильно: перестати приймати нові з'єднання, дочекатися поточних, закрити базу, вийти.</p>
+
+<pre><code class="language-ts">// src/server.ts
+import { createApp } from "./app.js";
+import { db } from "./db.js";
+import { config } from "./config.js";
+
+const server = createApp().listen(config.PORT, () =&gt; {
+  console.log(`listening on :${config.PORT}`);
+});
+
+// Keep-alive з'єднання можуть тримати сервер відкритим довго — обмежуємо
+server.keepAliveTimeout = 5_000;
+
+async function shutdown(signal: string) {
+  console.log(`${signal} received, shutting down`);
+
+  // 1. Перестати приймати нові з'єднання; колбек — коли всі поточні завершено
+  server.close(async () =&gt; {
+    // 2. Закрити пул з'єднань з базою
+    await db.end();
+    console.log("clean exit");
+    process.exit(0);
+  });
+
+  // 3. Страховка: якщо за 8 с не завершилися — виходимо примусово
+  //    (менше, ніж таймаут оркестратора, щоб встигнути залогувати)
+  setTimeout(() =&gt; {
+    console.error("forced exit");
+    process.exit(1);
+  }, 8_000).unref();
+}
+
+process.on("SIGTERM", () =&gt; shutdown("SIGTERM"));
+process.on("SIGINT", () =&gt; shutdown("SIGINT"));   // Ctrl+C локально</code></pre>
+
+<p>Нагадування з розділу про Dockerfile: це працює лише якщо node — PID 1 (exec-форма <code>CMD</code>). Інакше сигнал отримає shell і проігнорує його.</p>
+
+<h2 id="s12">12. Вартість і типові помилки</h2>
+<p>Орієнтовна вартість для маленького продукту (API + фронт + Postgres): VPS Hetzner CX22 — близько 4 €/міс за все; Fly.io — 5–15 $/міс залежно від бази; Railway — від 5 $ + споживання; Vercel Hobby — безкоштовно для фронтенду, база окремо (Neon free tier). AWS для того самого — від 30–50 $/міс, якщо брати керовані сервіси, і легко більше через непомітні витрати (NAT Gateway, трафік, снапшоти). Ставте billing alerts у перший день.</p>
+
+<div class="box warn">
+  <div class="title">Типові помилки, які коштують дорого</div>
+  <ul>
+    <li><strong><code>latest</code> у продакшені.</strong> Неможливо відтворити чи відкотити. Тегуйте за SHA або семвером.</li>
+    <li><strong>Секрети в образі.</strong> <code>COPY .env .</code> або <code>ENV JWT_SECRET=...</code> — секрет у шарі назавжди, навіть якщо потім видалити файл наступною інструкцією. Передавайте через env при запуску.</li>
+    <li><strong>Root у контейнері.</strong> Уразливість у застосунку + root = уразливість у хості через втечу з контейнера. <code>USER node</code> — один рядок.</li>
+    <li><strong>Без лімітів ресурсів.</strong> Витік пам'яті в одному контейнері з'їдає весь сервер і кладе базу поруч. <code>limits.memory</code> у Compose, <code>resources</code> у K8s.</li>
+    <li><strong>Без healthcheck.</strong> Контейнер «запущений», але застосунок завис — оркестратор не знає і трафік іде в нікуди.</li>
+    <li><strong>База без бекапів.</strong> Том — не бекап. <code>pg_dump</code> за cron у S3/R2 і хоча б раз перевірене відновлення.</li>
+    <li><strong>Порт бази назовні.</strong> <code>ports: ["5432:5432"]</code> на VPS з паролем <code>postgres</code> — ботів, які сканують інтернет, це знайде за години.</li>
+    <li><strong>Деплой без міграцій або міграції без сумісності.</strong> При rolling-деплої стара версія коду ще працює з новою схемою. Додавайте колонки з дефолтами, не видаляйте одразу — видаляйте через реліз.</li>
+  </ul>
+</div>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Наступний рівень після цього розділу: <strong>інфраструктура як код</strong> (Terraform, Pulumi) — сервери і бази описуються у файлах і створюються командою, а не кліками у консолі; <strong>GitOps</strong> (ArgoCD, Flux) — стан кластера синхронізується з git-репозиторієм, а деплой = merge; <strong>сканування образів</strong> (Trivy, Docker Scout) у CI на відомі вразливості; <strong>SBOM і підпис образів</strong> (cosign) для ланцюга постачання; <strong>distroless</strong>-образи від Google без shell взагалі. І окремо — <strong>preview environments</strong>: кожен PR автоматично отримує власне тимчасове середовище з URL (Vercel робить це з коробки, для Compose є інструменти на кшталт Coolify).</p>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам: повний шлях до продакшену</div>
+  <ol>
+    <li>Орендуйте найдешевший VPS (Hetzner CX22 або DigitalOcean Basic). Встановіть Docker за офіційною інструкцією, створіть користувача <code>deploy</code> без пароля з SSH-ключем, вимкніть вхід за паролем.</li>
+    <li>Купіть або візьміть безкоштовний домен (наприклад, у Cloudflare чи через DuckDNS) і направте A-запис на IP сервера.</li>
+    <li>Покладіть на сервер <code>compose.yaml</code> з app + db + cache + Caddy. <code>docker compose up -d</code>. Відкрийте <code>https://ваш-домен/health</code> — має бути валідний сертифікат.</li>
+    <li>Налаштуйте workflow із секції 7: додайте секрети <code>DEPLOY_HOST</code>, <code>DEPLOY_SSH_KEY</code> у репозиторій, зробіть push у main і подивіться, як деплой проходить сам.</li>
+    <li>Під час деплою запустіть у сусідньому терміналі <code>while true; do curl -s -o /dev/null -w "%{http_code}\n" https://домен/health; sleep 0.2; done</code>. Побачите, чи є помилки під час перемикання. Якщо є — це recreate; спробуйте зробити два екземпляри <code>app</code> і оновлювати їх по черзі.</li>
+    <li>Налаштуйте <code>pg_dump</code> за cron у Cloudflare R2 і відновіть базу з дампу на локальній машині.</li>
+  </ol>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим образ відрізняється від контейнера?</summary><p>Образ — незмінний набір шарів файлової системи плюс метадані (рецепт). Контейнер — запущений процес з цього образу з власним тонким записуваним шаром зверху (страва). З одного образу — багато контейнерів.</p></details>
+  <details><summary>2. Чому в Dockerfile залежності копіюють до коду?</summary><p>Бо шари кешуються по порядку. Якщо <code>package.json</code> не змінився, шар з <code>pnpm install</code> береться з кешу, і зміна одного файлу коду не переустановлює всі залежності.</p></details>
+  <details><summary>3. Що дає multi-stage build?</summary><p>Фінальний образ містить лише runtime-файли (Node + production-залежності + dist), без компілятора, тестів, dev-залежностей і вихідного коду. Менший розмір, менша поверхня атаки, швидший pull.</p></details>
+  <details><summary>4. Навіщо <code>depends_on</code> з <code>condition: service_healthy</code>?</summary><p>Просте <code>depends_on</code> чекає лише запуску контейнера, а не готовності бази приймати з'єднання. З <code>service_healthy</code> Compose чекає, поки healthcheck Postgres пройде, і застосунок не впаде з «connection refused».</p></details>
+  <details><summary>5. Чим blue-green відрізняється від canary?</summary><p>Blue-green перемикає 100 % трафіку одразу між двома повними середовищами — швидкий деплой і відкат, але ×2 ресурсів. Canary поступово збільшує частку трафіку нової версії (5 % → 100 %), спостерігаючи за метриками — безпечніше, але потребує вагового балансування і моніторингу.</p></details>
+  <details><summary>6. Чому shell-форма CMD ламає graceful shutdown?</summary><p><code>CMD node app.js</code> запускає <code>sh -c "node app.js"</code>: PID 1 — це sh, який не пересилає SIGTERM дочірньому процесу. Node не дізнається про зупинку і буде вбитий SIGKILL через таймаут. Exec-форма <code>CMD ["node","app.js"]</code> робить node PID 1.</p></details>
+  <details><summary>7. Чим liveness відрізняється від readiness?</summary><p>Liveness: «процес живий?» — при провалі контейнер перезапускають. Readiness: «готовий обслуговувати?» — перевіряє залежності (база); при провалі контейнер прибирають з балансування, але не перезапускають, бо проблема не в ньому.</p></details>
+  <details><summary>8. Коли Kubernetes — зайвий?</summary><p>Коли сервісів мало, команда маленька і немає людини для підтримки кластера. Compose на VPS чи PaaS покривають більшість потреб дешевше і простіше. K8s виправданий при десятках сервісів, потребі в автоскейлі й самовідновленні на кількох машинах.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>Контейнер — ізольований процес на спільному ядрі; образ — незмінні шари; Dockerfile — код, що їх описує.</li>
+  <li>Порядок у Dockerfile: базовий образ → залежності → код; multi-stage, <code>USER node</code>, exec-форма CMD, <code>.dockerignore</code>.</li>
+  <li>Compose описує всю зв'язку: сервіси бачать одне одного за іменем, дані живуть у томах, <code>depends_on</code> + healthcheck для порядку старту, порти бази не публікуються.</li>
+  <li>12-factor: конфіг у env, stateless-процеси, логи у stdout, один образ для всіх середовищ; секрети — ніколи в git чи образі.</li>
+  <li>CI — перевірки на кожен PR (швидке спершу); CD — збірка образу з тегом за SHA і деплой тільки з main.</li>
+  <li>Стратегії: recreate (простій), rolling (по одному, дві версії разом), blue-green (перемикач), canary (поступово за метриками).</li>
+  <li>Куди: PaaS для швидкого старту, VPS + Compose + Caddy для контролю і дешевизни, хмара — коли справді треба; K8s — не для трьох сервісів.</li>
+  <li>Обов'язково: healthcheck (liveness + readiness), graceful shutdown за SIGTERM, ліміти ресурсів, бекапи, billing alerts.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://docs.docker.com/get-started/" target="_blank" rel="noopener">Docker: Get Started</a> — офіційний вступ з практикою: образи, контейнери, томи, мережі, Compose.</li>
+    <li><a href="https://docs.docker.com/build/building/best-practices/" target="_blank" rel="noopener">Dockerfile best practices</a> — офіційні рекомендації: multi-stage, кеш шарів, .dockerignore, мінімальні образи.</li>
+    <li><a href="https://docs.docker.com/reference/compose-file/" target="_blank" rel="noopener">Compose file reference</a> — повна специфікація <code>compose.yaml</code>: services, volumes, networks, healthcheck, depends_on.</li>
+    <li><a href="https://12factor.net/" target="_blank" rel="noopener">The Twelve-Factor App</a> — маніфест, який визначив, як мають бути влаштовані хмарні застосунки; читається за 30 хвилин.</li>
+    <li><a href="https://docs.github.com/en/actions" target="_blank" rel="noopener">GitHub Actions Documentation</a> — синтаксис workflow, jobs, matrix, services, environments, secrets.</li>
+    <li><a href="https://github.com/docker/build-push-action" target="_blank" rel="noopener">docker/build-push-action</a> — стандартний спосіб збирати і пушити образи з Actions, з прикладами кешу.</li>
+    <li><a href="https://vercel.com/docs" target="_blank" rel="noopener">Vercel Docs</a> — деплой Next.js, preview deployments, змінні середовища.</li>
+    <li><a href="https://fly.io/docs/" target="_blank" rel="noopener">Fly.io Docs</a> — запуск Docker-образів на мікро-VM по регіонах, Postgres, secrets.</li>
+    <li><a href="https://caddyserver.com/docs/" target="_blank" rel="noopener">Caddy Docs</a> — reverse proxy з автоматичним HTTPS; розділ Caddyfile — головне.</li>
+    <li><a href="https://nginx.org/en/docs/beginners_guide.html" target="_blank" rel="noopener">nginx Beginner's Guide</a> — офіційний вступ: server, location, proxy_pass.</li>
+    <li><a href="https://letsencrypt.org/how-it-works/" target="_blank" rel="noopener">Let's Encrypt: How It Works</a> — як ACME видає безкоштовні сертифікати і що таке челендж.</li>
+    <li><a href="https://kubernetes.io/docs/concepts/" target="_blank" rel="noopener">Kubernetes Concepts</a> — Pod, Deployment, Service, Ingress з офіційного джерела.</li>
+    <li><a href="https://martinfowler.com/bliki/BlueGreenDeployment.html" target="_blank" rel="noopener">Martin Fowler: BlueGreenDeployment</a> — оригінальний опис стратегії.</li>
+    <li><a href="https://martinfowler.com/bliki/CanaryRelease.html" target="_blank" rel="noopener">Martin Fowler: CanaryRelease</a> — канарейковий реліз і його зв'язок з feature toggles.</li>
+    <li><a href="https://roadmap.sh/devops" target="_blank" rel="noopener">roadmap.sh: DevOps</a> — карта того, що вчити далі: IaC, моніторинг, безпека, оркестрація.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 11</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

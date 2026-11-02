@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>16. System Design: від задачі до схеми — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 16 · <span class="level-badge level-3">Про</span></div>
+  <h1>System Design: від задачі до схеми</h1>
+  <p class="lead">Після цього розділу ви зможете за 45 хвилин перетворити фразу «зробіть нам месенджер» на схему з цифрами, компромісами і планом масштабування — і пояснити кожну стрілку.</p>
+  <div class="meta"><span>⏱ ~120 хв</span><span>📚 Передумови: розділи 05, 06, 09, 12, 13, 14, 15</span><span>🎯 Ціль: методологія + 5 розібраних кейсів</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Що таке system design і чому його питають</a></li>
+    <li><a href="#s2">Методологія 4 кроків</a></li>
+    <li><a href="#s3">Крок 1: уточнення вимог</a></li>
+    <li><a href="#s4">Крок 2: оцінка «на серветці»</a></li>
+    <li><a href="#s5">Крок 3: будівельні блоки і високорівнева схема</a></li>
+    <li><a href="#s6">Крок 4: глибоке занурення і trade-offs</a></li>
+    <li><a href="#s7">Кейс A: URL shortener</a></li>
+    <li><a href="#s8">Кейс B: чат-месенджер</a></li>
+    <li><a href="#s9">Кейс C: стрічка новин</a></li>
+    <li><a href="#s10">Кейс D: фото-сервіс (Instagram)</a></li>
+    <li><a href="#s11">Кейс E: rate limiter</a></li>
+    <li><a href="#s12">Як говорити на співбесіді</a></li>
+    <li><a href="#s13">Як тренуватись</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви, що тебе попросили побудувати дитячий майданчик. Поганий будівельник одразу везе бетон і ставить гірку. Хороший спершу питає: <b>скільки дітей</b> прийде? Малюки чи підлітки? Що вони люблять — гойдалки чи лазити? Буде дощ? Скільки грошей є? І тільки потім малює план: тут пісочниця, тут гірка, а тут запас місця, бо через рік дітей буде вдвічі більше.</p>
+  <p>System design — це те саме для програм. Спершу питання, потім цифри на серветці, потім схема з квадратиками і стрілками, і лише потім — вибір, де саме треба «товстий бетон» (складна частина), а де вистачить піску.</p>
+</div>
+
+<h2 id="s1">1. Що таке system design і чому його питають на співбесідах</h2>
+<p>Проєктування систем (system design) — це процес перетворення розмитої задачі («потрібен сервіс для обміну фото») на конкретну архітектуру: які компоненти, як з'єднані, де зберігаються дані, як це витримає мільйон користувачів і що робити, коли щось впаде. Всі попередні розділи давали вам «цеглинки»: базу даних, кеш, чергу, балансувальник. Цей розділ — про те, як з цеглинок будувати будинок.</p>
+<p>Чому це питають на співбесідах для middle+ і особливо senior? Бо код може написати багато хто, а <b>приймати рішення з компромісами</b> — ні. Інтерв'юер не чекає «правильної» архітектури (її не існує). Він дивиться, як ви:</p>
+<ul>
+  <li>ставите питання замість припущень;</li>
+  <li>оцінюєте масштаб числами, а не «багато»;</li>
+  <li>знаєте стандартні будівельні блоки і <i>коли їх не треба</i>;</li>
+  <li>знаходите вузьке місце (bottleneck) і пропонуєте два варіанти з плюсами і мінусами;</li>
+  <li>вмієте говорити про це вголос зрозуміло.</li>
+</ul>
+<p>І ще: навіть якщо ви ніколи не проєктуватимете Instagram, ці навички потрібні щодня — коли обираєте, чи додати чергу, чи вистачить cron, чи потрібен Redis, чи достатньо індексу в Postgres.</p>
+
+<h2 id="s2">2. Методологія 4 кроків</h2>
+<p>Усі відомі гайди (system-design-primer, Alex Xu, hellointerview) зводяться до однієї схеми. Її треба знати напам'ять, як таблицю множення.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Чотири кроки методології system design">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="15" y="40" width="165" height="120" rx="14" class="accent"/>
+    <text x="97" y="68" text-anchor="middle" class="bold">1. Вимоги</text>
+    <text x="97" y="92" text-anchor="middle" class="small">функціональні</text>
+    <text x="97" y="110" text-anchor="middle" class="small">нефункціональні</text>
+    <text x="97" y="128" text-anchor="middle" class="small">масштаб, обмеження</text>
+    <text x="97" y="150" text-anchor="middle" class="muted">~5–8 хв</text>
+    <path d="M180 100 L200 100" class="arrow"/>
+    <rect x="203" y="40" width="165" height="120" rx="14" class="blue"/>
+    <text x="285" y="68" text-anchor="middle" class="bold">2. Оцінка</text>
+    <text x="285" y="92" text-anchor="middle" class="small">DAU → QPS</text>
+    <text x="285" y="110" text-anchor="middle" class="small">storage, bandwidth</text>
+    <text x="285" y="128" text-anchor="middle" class="small">кеш 80/20</text>
+    <text x="285" y="150" text-anchor="middle" class="muted">~5 хв</text>
+    <path d="M368 100 L388 100" class="arrow"/>
+    <rect x="391" y="40" width="165" height="120" rx="14" class="green"/>
+    <text x="473" y="68" text-anchor="middle" class="bold">3. Схема</text>
+    <text x="473" y="92" text-anchor="middle" class="small">будівельні блоки</text>
+    <text x="473" y="110" text-anchor="middle" class="small">API, модель даних</text>
+    <text x="473" y="128" text-anchor="middle" class="small">потік запиту</text>
+    <text x="473" y="150" text-anchor="middle" class="muted">~10–15 хв</text>
+    <path d="M556 100 L576 100" class="arrow"/>
+    <rect x="579" y="40" width="165" height="120" rx="14" class="purple"/>
+    <text x="661" y="68" text-anchor="middle" class="bold">4. Занурення</text>
+    <text x="661" y="92" text-anchor="middle" class="small">2–3 компоненти</text>
+    <text x="661" y="110" text-anchor="middle" class="small">bottlenecks</text>
+    <text x="661" y="128" text-anchor="middle" class="small">trade-offs</text>
+    <text x="661" y="150" text-anchor="middle" class="muted">~15–20 хв</text>
+    <path d="M661 160 Q661 230 380 230 Q97 230 97 165" class="arrow dashed"/>
+    <text x="380" y="250" text-anchor="middle" class="muted">нові обмеження → повертаємось і уточнюємо (ітерація)</text>
+    <text x="380" y="285" text-anchor="middle" class="small">Останні 5 хв: підсумок, що б зробили далі, відкриті питання</text>
+  </svg>
+  <figcaption>Чотири кроки з приблизним таймінгом для 45-хвилинної співбесіди. У реальній роботі те саме, тільки крок 1 триває тижні, а не хвилини.</figcaption>
+</figure>
+
+<h2 id="s3">3. Крок 1: уточнення вимог</h2>
+<p>Найпоширеніша помилка — почати малювати. Задача завжди сформульована розмито навмисно. «Спроєктуйте Twitter» — це що? Постити? Читати стрічку? Пошук? Реклама? DM? Усе разом не влізе в 45 хвилин, тож треба <b>звузити</b>.</p>
+<h3>Функціональні вимоги (functional requirements)</h3>
+<p>Що система <i>робить</i>. Виберіть 3–4 головні: «користувач публікує пост до 280 символів; бачить стрічку від тих, на кого підписаний; підписується/відписується». Явно скажіть, що виносите за дужки: «пошук і рекламу не розглядаємо».</p>
+<h3>Нефункціональні вимоги (non-functional requirements)</h3>
+<p>Як система це робить. Стандартний список для запитання:</p>
+<ul>
+  <li><b>Масштаб:</b> скільки користувачів (DAU), скільки постів на день, співвідношення читання/запису?</li>
+  <li><b>Латентність:</b> стрічка має завантажуватись за 200 мс чи можна 2 с?</li>
+  <li><b>Доступність (availability):</b> 99,9 %? Чи можна лежати годину на місяць?</li>
+  <li><b>Консистентність (consistency):</b> чи критично бачити пост друга миттєво, або через 5 секунд теж ок (eventual consistency)?</li>
+  <li><b>Довговічність (durability):</b> чи можна втратити повідомлення? (У месенджері — ні. У лічильнику переглядів — так.)</li>
+  <li><b>Обмеження:</b> бюджет, регіон (один дата-центр чи весь світ), команда (5 людей не підтримають 30 мікросервісів).</li>
+</ul>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Відповідь «читання в 100 разів більше за запис» повністю змінює архітектуру: ви кешуєте все і денормалізуєте. Відповідь «консистентність не критична» дозволяє асинхронну обробку через чергу. Відповідь «10 000 користувачів» означає, що один Postgres і два сервери — ідеальне рішення, а Kafka та шардінг — це overengineering, який інтерв'юер запише в мінус. Питання — це не слабкість, це і є інженерія.</p>
+</div>
+
+<h2 id="s4">4. Крок 2: оцінка «на серветці»</h2>
+<p>Оцінка порядку величин (back-of-the-envelope estimation) — це не про точність, а про те, «чи це 10 серверів, чи 10 000». Формули прості, головне — знати кілька чисел і не боятись округляти.</p>
+
+<h3>Формули</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Що</th><th>Формула</th><th>Приклад (стрічка, 10 M DAU)</th></tr>
+<tr><td>Запитів/секунду (QPS)</td><td>DAU × дій на день ÷ 86 400 (≈ 10⁵ для простоти)</td><td>10 M × 10 читань ÷ 10⁵ = <b>1 000 QPS</b> читання</td></tr>
+<tr><td>Піковий QPS</td><td>середній × 2…3</td><td>≈ <b>3 000 QPS</b></td></tr>
+<tr><td>Запис</td><td>DAU × постів на день ÷ 10⁵</td><td>10 M × 0,5 ÷ 10⁵ = <b>50 QPS</b> запису (read:write = 20:1)</td></tr>
+<tr><td>Storage на день</td><td>записів × розмір запису</td><td>5 M постів × 1 KB = <b>5 GB/день</b></td></tr>
+<tr><td>Storage на 5 років</td><td>× 365 × 5 (≈ ×2 000)</td><td>5 GB × 2 000 = <b>10 TB</b> (без медіа)</td></tr>
+<tr><td>Bandwidth</td><td>QPS × розмір відповіді</td><td>1 000 × 20 KB = <b>20 MB/s</b> вихідний</td></tr>
+<tr><td>Кеш (правило 80/20)</td><td>20 % щоденних даних дають 80 % трафіку</td><td>щоденне читання 1 000 × 20 KB × 10⁵ = 2 TB → кеш <b>≈ 400 GB</b></td></tr>
+</table>
+</div>
+
+<h3>Числа, які треба знати</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Операція</th><th>Час</th><th>Для порівняння</th></tr>
+<tr><td>Звернення до L1 кешу CPU</td><td>~1 нс</td><td>клацнути пальцями</td></tr>
+<tr><td>Звернення до RAM</td><td>~100 нс</td><td>у 100 разів повільніше за L1</td></tr>
+<tr><td>Читання 1 MB з RAM</td><td>~250 мкс</td><td></td></tr>
+<tr><td>Читання з Redis (у тому ж ДЦ)</td><td>~0,5 мс</td><td>мережа + обробка</td></tr>
+<tr><td>Читання 1 MB з SSD</td><td>~1 мс</td><td>у 4 рази повільніше за RAM</td></tr>
+<tr><td>Простий запит до Postgres по індексу</td><td>1–5 мс</td><td></td></tr>
+<tr><td>Round-trip у межах дата-центру</td><td>~0,5 мс</td><td></td></tr>
+<tr><td>Round-trip Європа ↔ США</td><td>~100–150 мс</td><td>швидкість світла, не обійти</td></tr>
+<tr><td>Читання 1 MB з HDD</td><td>~20 мс</td><td>у 20 разів повільніше за SSD</td></tr>
+<tr><td>1 сервер (16 ядер) Node.js API</td><td>~5–20 K простих QPS</td><td>залежить від роботи в запиті</td></tr>
+<tr><td>Postgres на хорошому сервері</td><td>~10–50 K простих QPS читання</td><td>запис 1–10 K/с</td></tr>
+<tr><td>Redis</td><td>~100 K+ QPS на ядро</td><td></td></tr>
+<tr><td>Секунд у день</td><td>86 400 ≈ 10⁵</td><td>секунд у рік ≈ 3 × 10⁷</td></tr>
+<tr><td>Розміри</td><td>1 KB — короткий JSON; 100 KB — фото-превʼю; 2–5 MB — фото; 1 GB — годинне відео HD</td><td></td></tr>
+</table>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Оціни YouTube: 2 млрд MAU, кожен дивиться 5 відео на день по 10 хв, завантажується 500 годин відео на хвилину. Порахуй QPS переглядів, вихідний bandwidth (середній бітрейт 3 Mbps), storage на рік (1 GB/год × 3 копії якості).</li>
+    <li>Оціни свій API нотаток на 50 000 користувачів. Скільки серверів? Чи потрібен кеш взагалі? (Спойлер: один Postgres усміхнеться і не помітить.)</li>
+    <li>Запиши свої результати. Порівняй із публічними числами — порядок величин співпав?</li>
+  </ol>
+</div>
+
+<h2 id="s5">5. Крок 3: будівельні блоки і високорівнева схема</h2>
+<p>Практично будь-яка велика система збирається з одного набору деталей. Знати роль кожної — як знати, що робить кожен інструмент у ящику.</p>
+
+<figure>
+  <svg viewBox="0 0 760 420" role="img" aria-label="Стандартні будівельні блоки вебсистеми">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="30" width="110" height="50" rx="12" class="accent"/>
+    <text x="75" y="60" text-anchor="middle" class="bold">Клієнт</text>
+    <rect x="20" y="110" width="110" height="50" rx="12" class="box-fill"/>
+    <text x="75" y="140" text-anchor="middle" class="small">DNS</text>
+    <path d="M75 80 L75 110" class="arrow"/>
+    <path d="M130 55 L200 55" class="arrow"/>
+    <rect x="205" y="30" width="110" height="50" rx="12" class="green"/>
+    <text x="260" y="60" text-anchor="middle" class="bold">CDN</text>
+    <text x="260" y="98" text-anchor="middle" class="muted">статика, медіа</text>
+    <path d="M315 55 L390 55" class="arrow"/>
+    <rect x="395" y="30" width="110" height="50" rx="12" class="blue"/>
+    <text x="450" y="60" text-anchor="middle" class="bold">LB</text>
+    <text x="450" y="98" text-anchor="middle" class="muted">балансувальник</text>
+    <path d="M450 80 L450 130" class="arrow"/>
+    <rect x="360" y="135" width="180" height="50" rx="12" class="blue"/>
+    <text x="450" y="157" text-anchor="middle" class="bold">API gateway / API</text>
+    <text x="450" y="175" text-anchor="middle" class="small">auth, rate limit, роутинг</text>
+    <path d="M450 185 L450 225" class="arrow"/>
+    <rect x="340" y="230" width="220" height="50" rx="12" class="blue"/>
+    <text x="450" y="252" text-anchor="middle" class="bold">Сервіси (stateless)</text>
+    <text x="450" y="270" text-anchor="middle" class="small">×N копій, бізнес-логіка</text>
+    <path d="M340 255 L200 255" class="arrow"/>
+    <rect x="70" y="230" width="130" height="50" rx="12" class="red"/>
+    <text x="135" y="252" text-anchor="middle" class="bold">Кеш</text>
+    <text x="135" y="270" text-anchor="middle" class="small">Redis / Memcached</text>
+    <path d="M450 280 L450 330" class="arrow"/>
+    <rect x="360" y="335" width="180" height="60" rx="12" class="green"/>
+    <text x="450" y="358" text-anchor="middle" class="bold">БД</text>
+    <text x="450" y="378" text-anchor="middle" class="small">primary + replicas / shards</text>
+    <path d="M560 255 L620 255" class="arrow"/>
+    <rect x="625" y="230" width="120" height="50" rx="12" class="purple"/>
+    <text x="685" y="252" text-anchor="middle" class="bold">Черга</text>
+    <text x="685" y="270" text-anchor="middle" class="small">Kafka / RabbitMQ</text>
+    <path d="M685 280 L685 330" class="arrow"/>
+    <rect x="625" y="335" width="120" height="60" rx="12" class="purple"/>
+    <text x="685" y="358" text-anchor="middle" class="bold">Workers</text>
+    <text x="685" y="378" text-anchor="middle" class="small">async обробка</text>
+    <rect x="70" y="335" width="130" height="60" rx="12" class="accent"/>
+    <text x="135" y="358" text-anchor="middle" class="bold">Object storage</text>
+    <text x="135" y="378" text-anchor="middle" class="small">S3: фото, відео</text>
+    <path d="M200 365 L360 365" class="arrow dashed"/>
+    <path d="M135 335 L135 280" class="arrow dashed"/>
+    <rect x="200" y="135" width="120" height="50" rx="12" class="box-fill"/>
+    <text x="260" y="157" text-anchor="middle" class="bold">Пошук</text>
+    <text x="260" y="175" text-anchor="middle" class="small">Elasticsearch</text>
+    <path d="M360 160 L320 160" class="arrow dashed"/>
+    <rect x="560" y="135" width="150" height="50" rx="12" class="box-fill"/>
+    <text x="635" y="157" text-anchor="middle" class="bold">Observability</text>
+    <text x="635" y="175" text-anchor="middle" class="small">логи, метрики, трейси</text>
+    <path d="M540 160 L560 160" class="arrow dashed"/>
+  </svg>
+  <figcaption>«Ящик з інструментами». Не кожній системі потрібні всі блоки — пошук і черга з'являються тільки коли є відповідна вимога.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+<tr><th>Блок</th><th>Роль</th><th>Коли потрібен</th><th>Розділ</th></tr>
+<tr><td><b>DNS</b></td><td>Ім'я → IP; geo-routing на найближчий регіон</td><td>Завжди</td><td>01</td></tr>
+<tr><td><b>CDN</b></td><td>Кешує статику/медіа на «краю» біля користувача</td><td>Медіа, глобальна аудиторія</td><td>12</td></tr>
+<tr><td><b>Load balancer</b></td><td>Розкидає запити по копіях; health checks; TLS</td><td>&gt; 1 копії сервісу</td><td>14</td></tr>
+<tr><td><b>API gateway</b></td><td>Auth, rate limiting, роутинг, версіонування</td><td>Кілька сервісів або публічний API</td><td>09, 13</td></tr>
+<tr><td><b>Stateless сервіси</b></td><td>Бізнес-логіка; масштабуються горизонтально, бо не тримають стан</td><td>Завжди</td><td>04, 14</td></tr>
+<tr><td><b>Кеш</b></td><td>Гарячі дані в пам'яті; знімає 80–95 % читання з БД</td><td>Read-heavy навантаження</td><td>12</td></tr>
+<tr><td><b>SQL БД</b></td><td>Транзакції, зв'язки, гнучкі запити</td><td>За замовчуванням</td><td>05</td></tr>
+<tr><td><b>NoSQL БД</b></td><td>Величезні обсяги простих записів, горизонтальний шардінг «з коробки»</td><td>Time-series, повідомлення, логи</td><td>06</td></tr>
+<tr><td><b>Черга / стрім</b></td><td>Розв'язує сервіси, згладжує піки, async-обробка</td><td>Довгі операції, fan-out, події</td><td>13</td></tr>
+<tr><td><b>Object storage</b></td><td>Файли будь-якого розміру, дешево, 11 дев'яток durability</td><td>Медіа, бекапи</td><td>11</td></tr>
+<tr><td><b>Пошук</b></td><td>Повнотекстовий пошук, інвертований індекс</td><td>Вимога «шукати за текстом»</td><td>06</td></tr>
+</table>
+</div>
+
+<h3>Що малювати на кроці 3</h3>
+<ol>
+  <li><b>API</b> — 3–5 ендпоінтів з параметрами і відповідями. Це дисциплінує: одразу видно, які дані потрібні.</li>
+  <li><b>Модель даних</b> — головні таблиці/колекції з ключами. Одразу подумайте, який ключ шардінгу.</li>
+  <li><b>Схема</b> — потік одного запиту читання і одного запису через блоки. Говоріть уголос: «клієнт → LB → API → перевірка кешу → якщо miss, БД → записати в кеш → відповідь».</li>
+</ol>
+
+<h2 id="s6">6. Крок 4: глибоке занурення і trade-offs</h2>
+<p>Тепер інтерв'юер (або ви самі) обирає 2–3 найцікавіші компоненти і копає. Питання завжди одне: <b>де вузьке місце і що з ним робити?</b> Типові напрямки: генерація унікальних id, гарячі ключі, шардінг, консистентність кешу, доставка в реальному часі, обробка збоїв.</p>
+<p>Найважливіше вміння тут — говорити компромісами. Не «використаємо Cassandra», а «Cassandra дасть лінійний запис і шардінг з коробки, але втратимо JOIN і транзакції; для повідомлень це прийнятно, бо запити завжди по chat_id».</p>
+
+<h3>Типові компроміси</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Вибір</th><th>Варіант A</th><th>Варіант B</th><th>Коли що</th></tr>
+<tr><td><b>SQL vs NoSQL</b></td><td>SQL: транзакції, JOIN, схема, зрілість</td><td>NoSQL: горизонтальний масштаб, гнучка схема, простий доступ по ключу</td><td>SQL за замовчуванням; NoSQL коли &gt; 10 TB і доступ завжди по ключу, або документи без зв'язків</td></tr>
+<tr><td><b>Sync vs async</b></td><td>Sync: простіше, миттєвий результат, зрозумілі помилки</td><td>Async (черга): розв'язка, згладжування піків, ретраї; але eventual consistency і складніша відладка</td><td>Async для всього, що &gt; 200 мс або може почекати (email, обробка медіа, fan-out)</td></tr>
+<tr><td><b>Push vs pull</b></td><td>Push: сервер шле дані (WebSocket, SSE); низька латентність</td><td>Pull: клієнт опитує (polling); просто, масштабується, але затримка і зайві запити</td><td>Push для чату/нотифікацій; pull для стрічки, дашбордів з оновленням раз на хвилину</td></tr>
+<tr><td><b>Консистентність vs доступність</b> (CAP)</td><td>CP: при розділенні мережі відмовляємо в записі, але дані узгоджені</td><td>AP: завжди відповідаємо, але дані можуть тимчасово розійтись</td><td>CP: гроші, інвентар, бронювання. AP: лайки, лічильники, стрічка, presence</td></tr>
+<tr><td><b>Нормалізація vs денормалізація</b></td><td>Нормалізовано: без дублювання, легко оновлювати, JOIN на читанні</td><td>Денормалізовано: дублюємо дані для швидкого читання, складніше оновлювати</td><td>Read-heavy → денормалізуйте (готова стрічка, лічильники); write-heavy → нормалізуйте</td></tr>
+<tr><td><b>Сильна vs eventual consistency</b></td><td>Сильна: після запису всі читання бачать нове; дорожче, повільніше</td><td>Eventual: репліки наздоганяють за мс–с; дешево, швидко</td><td>Сильна для власних дій користувача (read-your-writes), eventual для чужих</td></tr>
+<tr><td><b>Моноліт vs мікросервіси</b></td><td>Моноліт: простий деплой, транзакції, одна кодова база</td><td>Мікросервіси: незалежне масштабування і деплой; ціна — мережа, спостережуваність, координація</td><td>Моноліт до ~10 розробників або поки не болить; див. розділ 13</td></tr>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Рівень senior відрізняється тим, що ви думаєте про <b>режими відмов</b> (failure modes) до того, як спитали. Що станеться, якщо Redis упаде? (Cache stampede на БД → потрібен circuit breaker і request coalescing.) Якщо черга затримується на 10 хв? (Користувач бачить стару стрічку — прийнятно; але для оплат — ні, потрібен sync fallback.) Якщо один шард отримує всіх «гарячих» користувачів? (Hot partition → salt у ключі або виділений шард для celebrity.) Якщо два дата-центри втратять зв'язок? (Split-brain → потрібен кворум або один активний регіон.) Проговорюйте один-два такі сценарії — це те, що відрізняє «знає слова» від «будував».</p>
+</div>
+
+<h2 id="s7">7. Кейс A: URL shortener (bit.ly)</h2>
+<h3>Вимоги</h3>
+<p><b>Функціональні:</b> дати довгий URL → отримати короткий; перейти за коротким → редирект на довгий; опційно — власний alias і TTL. <b>Нефункціональні:</b> редирект &lt; 50 мс (латентність критична — це відчувають на кожному кліку); доступність 99,99 % (посилання в друкованій рекламі мають працювати роками); короткий код 7 символів; читання ≫ запис.</p>
+<h3>Оцінка</h3>
+<p>100 M нових URL на місяць → 100 M ÷ (30 × 10⁵) ≈ <b>40 записів/с</b>. Читання : запис = 100 : 1 → <b>4 000 редиректів/с</b>, пік 10 000. Storage: 100 M × 12 міс × 5 років × 500 байт (URL + метадані) = 6 × 10⁹ × 500 B = <b>3 TB</b>. Кеш 20 % щоденних: 4 000 × 10⁵ × 0,2 = 80 M ключів × 500 B = <b>40 GB</b> — вміщається в один Redis.</p>
+<h3>API і дані</h3>
+<pre><code class="language-text">POST /api/v1/urls        { "longUrl": "https://...", "alias?": "promo", "ttlDays?": 365 }
+                          → 201 { "shortUrl": "https://sho.rt/Ab3xK9q" }
+GET  /Ab3xK9q             → 301/302 Location: https://...
+
+Таблиця urls:
+  short_key  varchar(7)  PRIMARY KEY   -- Ab3xK9q
+  long_url   text        NOT NULL
+  user_id    bigint
+  created_at timestamptz
+  expires_at timestamptz NULL</code></pre>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Архітектура URL shortener">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="120" width="110" height="60" rx="12" class="accent"/>
+    <text x="75" y="155" text-anchor="middle" class="bold">Клієнт</text>
+    <path d="M130 150 L200 150" class="arrow"/>
+    <rect x="205" y="120" width="90" height="60" rx="12" class="blue"/>
+    <text x="250" y="155" text-anchor="middle" class="bold">LB</text>
+    <path d="M295 150 L365 150" class="arrow"/>
+    <rect x="370" y="110" width="140" height="80" rx="12" class="blue"/>
+    <text x="440" y="140" text-anchor="middle" class="bold">API ×N</text>
+    <text x="440" y="160" text-anchor="middle" class="small">read: кеш → БД</text>
+    <text x="440" y="178" text-anchor="middle" class="small">write: id → base62</text>
+    <path d="M440 110 L440 60" class="arrow"/>
+    <rect x="370" y="20" width="140" height="40" rx="12" class="red"/>
+    <text x="440" y="45" text-anchor="middle" class="bold">Redis (гарячі URL)</text>
+    <text x="560" y="45" class="muted">hit ≈ 90 %</text>
+    <path d="M510 150 L590 150" class="arrow"/>
+    <rect x="595" y="110" width="145" height="80" rx="12" class="green"/>
+    <text x="667" y="140" text-anchor="middle" class="bold">Postgres</text>
+    <text x="667" y="160" text-anchor="middle" class="small">primary + 2 replicas</text>
+    <text x="667" y="178" text-anchor="middle" class="small">3 TB, KV-подібно</text>
+    <path d="M440 190 L440 240" class="arrow"/>
+    <rect x="340" y="245" width="200" height="60" rx="12" class="purple"/>
+    <text x="440" y="270" text-anchor="middle" class="bold">Key Generation Service</text>
+    <text x="440" y="290" text-anchor="middle" class="small">видає діапазони id: [1M..2M)</text>
+    <path d="M440 305 L440 320" class="arrow dashed"/>
+    <text x="440" y="322" text-anchor="middle" class="muted"></text>
+    <text x="120" y="230" text-anchor="middle" class="muted">GET /Ab3xK9q</text>
+    <text x="120" y="248" text-anchor="middle" class="muted">→ 302 Location: …</text>
+    <text x="120" y="266" text-anchor="middle" class="muted">≈ 2 мс з кешу</text>
+    <path d="M655 190 L655 240" class="arrow dashed"/>
+    <rect x="590" y="245" width="150" height="60" rx="12" class="box-fill"/>
+    <text x="665" y="270" text-anchor="middle" class="bold">Analytics</text>
+    <text x="665" y="290" text-anchor="middle" class="small">через чергу, async</text>
+  </svg>
+  <figcaption>Читання майже завжди з Redis; запис іде через сервіс генерації ключів, який роздає API-копіям діапазони лічильника, щоб не ходити в БД за кожним id.</figcaption>
+</figure>
+
+<h3>Глибоке занурення: генерація ключа</h3>
+<p>7 символів base62 (a–z, A–Z, 0–9) = 62⁷ ≈ 3,5 × 10¹² комбінацій — вистачить на тисячі років. Три способи їх отримати:</p>
+<ol>
+  <li><b>Hash (MD5/SHA-256 від URL) + обрізати до 7 символів.</b> Просто, детерміновано (той самий URL → той самий код), але обрізаний хеш дає <b>колізії</b>: при 10⁹ записів ймовірність відчутна. Треба перевіряти в БД і при колізії додавати суфікс — зайвий round-trip на кожен запис.</li>
+  <li><b>Лічильник (counter) + base62.</b> Беремо auto-increment id (наприклад 1 000 000 000) і кодуємо в base62 → <code>15FTGg</code>. Колізій нуль за визначенням. Мінус: один глобальний лічильник — точка відмови і вузьке місце; коди передбачувані (можна перебрати чужі посилання — для деяких продуктів це проблема).</li>
+  <li><b>Key Generation Service (KGS).</b> Окремий сервіс роздає копіям API <i>діапазони</i> (наприклад по мільйону id) з БД-лічильника. Кожна копія генерує id локально в пам'яті без мережі. Якщо копія впала — діапазон втрачено, це нормально (простір величезний). Це вибір великих сервісів.</li>
+</ol>
+<pre><code class="language-js">// base62-кодування лічильника
+const ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+export function toBase62(n) {
+  let s = "";
+  do { s = ALPHABET[n % 62] + s; n = Math.floor(n / 62); } while (n &gt; 0);
+  return s.padStart(7, "0"); // фіксована довжина 7
+}
+// Щоб коди не були послідовними (не перебиралися), можна XOR-ити id із секретною константою
+// або перемішувати біти — але не хешувати, щоб зберегти гарантію унікальності.</code></pre>
+
+<h3>301 чи 302?</h3>
+<p><b>301 Moved Permanently</b> — браузер закешує редирект назавжди і наступного разу піде на довгий URL напряму, не питаючи нас. Плюс: менше навантаження. Мінус: ми <b>не бачимо кліків</b> (аналітика — головна причина існування bit.ly) і не можемо змінити ціль. <b>302 Found</b> (або 307) — щоразу через нас. Для сервісу з аналітикою — 302. Для внутрішнього редиректу без статистики — 301.</p>
+
+<h3>Масштабування</h3>
+<ul>
+  <li><b>Гарячі посилання:</b> одне посилання на головній сторінці новин може дати 50 % трафіку. Redis з LRU-витісненням, TTL 24 год, плюс CDN-кеш редиректів на edge (Cloudflare Workers) — тоді 90 % кліків не долітають навіть до LB.</li>
+  <li><b>БД:</b> 3 TB у Postgres нормально; при зростанні — шардінг за <code>short_key</code> (діапазони або hash), бо запит завжди по ключу.</li>
+  <li><b>TTL і очищення:</b> лінивe видалення (при читанні перевіряємо <code>expires_at</code>) + фоновий воркер раз на добу.</li>
+  <li><b>Аналітика:</b> не писати в БД на кожен клік (4 000 QPS запису вб'ють primary). Кидати подію в Kafka, агрегувати воркером у ClickHouse/аналітичну таблицю.</li>
+</ul>
+
+<h2 id="s8">8. Кейс B: чат-месенджер (WhatsApp / Telegram)</h2>
+<h3>Вимоги</h3>
+<p><b>Функціональні:</b> 1:1 чат і групи до 500; доставка в реальному часі; статуси «надіслано / доставлено / прочитано»; історія; presence (online/last seen); push, коли офлайн. <b>Нефункціональні:</b> латентність доставки &lt; 200 мс онлайн; повідомлення не губляться (durability!); порядок повідомлень у межах чату; 50 M DAU.</p>
+<h3>Оцінка</h3>
+<p>50 M DAU × 40 повідомлень = 2 × 10⁹ повідомлень/день ≈ <b>20 000 повідомлень/с</b>, пік 60 000. Кожне ~100 байт + метадані → 200 B × 2 × 10⁹ = <b>400 GB/день</b>, 5 років ≈ 700 TB — це вже не «один Postgres». Одночасних WebSocket-з'єднань: ~10 M (20 % DAU онлайн). Один сервер тримає ~100 K з'єднань → <b>100 chat-серверів</b> тільки на з'єднання.</p>
+<h3>API</h3>
+<pre><code class="language-text">WebSocket wss://chat.example/ws  (після HTTP auth, upgrade)
+  client → server:  { "type":"send", "chatId":"c_42", "clientMsgId":"uuid", "text":"привіт" }
+  server → client:  { "type":"ack",  "clientMsgId":"uuid", "msgId":"7f3…", "ts":1725900000 }
+  server → client:  { "type":"msg",  "chatId":"c_42", "msgId":"7f3…", "from":"u_1", "text":"…" }
+  client → server:  { "type":"read", "chatId":"c_42", "upToMsgId":"7f3…" }
+
+HTTP (не realtime):
+  GET /chats/{id}/messages?before={msgId}&amp;limit=50   -- історія, пагінація курсором
+  POST /chats                                          -- створити чат/групу</code></pre>
+
+<figure>
+  <svg viewBox="0 0 760 400" role="img" aria-label="Архітектура чат-месенджера з WebSocket і чергою">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="15" y="40" width="100" height="50" rx="12" class="accent"/>
+    <text x="65" y="70" text-anchor="middle" class="bold">Оля (A)</text>
+    <rect x="15" y="300" width="100" height="50" rx="12" class="accent"/>
+    <text x="65" y="330" text-anchor="middle" class="bold">Іван (B)</text>
+    <path d="M115 65 L185 65" class="arrow"/>
+    <text x="150" y="55" text-anchor="middle" class="mono">WS</text>
+    <rect x="190" y="40" width="130" height="50" rx="12" class="blue"/>
+    <text x="255" y="62" text-anchor="middle" class="bold">Chat server #3</text>
+    <text x="255" y="80" text-anchor="middle" class="small">100 K з'єднань</text>
+    <rect x="190" y="300" width="130" height="50" rx="12" class="blue"/>
+    <text x="255" y="322" text-anchor="middle" class="bold">Chat server #17</text>
+    <text x="255" y="340" text-anchor="middle" class="small">100 K з'єднань</text>
+    <path d="M190 325 L115 325" class="arrow"/>
+    <text x="150" y="315" text-anchor="middle" class="mono">WS</text>
+    <path d="M320 65 L400 65" class="arrow"/>
+    <text x="360" y="55" text-anchor="middle" class="small">1. send</text>
+    <rect x="405" y="30" width="150" height="70" rx="12" class="purple"/>
+    <text x="480" y="55" text-anchor="middle" class="bold">Message service</text>
+    <text x="480" y="75" text-anchor="middle" class="small">id, ts, зберегти, ack</text>
+    <text x="480" y="92" text-anchor="middle" class="small">→ fan-out</text>
+    <path d="M480 100 L480 150" class="arrow"/>
+    <text x="510" y="130" class="small">2. write</text>
+    <rect x="405" y="155" width="150" height="60" rx="12" class="green"/>
+    <text x="480" y="178" text-anchor="middle" class="bold">Cassandra</text>
+    <text x="480" y="198" text-anchor="middle" class="small">partition: chat_id</text>
+    <path d="M555 65 L640 65" class="arrow"/>
+    <text x="597" y="55" text-anchor="middle" class="small">3. publish</text>
+    <rect x="645" y="40" width="100" height="50" rx="12" class="purple"/>
+    <text x="695" y="62" text-anchor="middle" class="bold">Kafka /</text>
+    <text x="695" y="80" text-anchor="middle" class="bold">Redis pub/sub</text>
+    <path d="M695 90 L695 240" class="arrow"/>
+    <rect x="620" y="245" width="130" height="60" rx="12" class="blue"/>
+    <text x="685" y="268" text-anchor="middle" class="bold">Session registry</text>
+    <text x="685" y="288" text-anchor="middle" class="small">B → server #17</text>
+    <path d="M620 285 L320 325" class="arrow"/>
+    <text x="470" y="295" text-anchor="middle" class="small">4. route до server #17</text>
+    <rect x="405" y="330" width="150" height="55" rx="12" class="red"/>
+    <text x="480" y="352" text-anchor="middle" class="bold">Push (APNs/FCM)</text>
+    <text x="480" y="371" text-anchor="middle" class="small">якщо B офлайн</text>
+    <path d="M620 300 L555 350" class="arrow dashed"/>
+    <rect x="190" y="150" width="150" height="55" rx="12" class="red"/>
+    <text x="265" y="172" text-anchor="middle" class="bold">Presence (Redis)</text>
+    <text x="265" y="192" text-anchor="middle" class="small">heartbeat кожні 30 с, TTL</text>
+    <path d="M255 90 L255 150" class="arrow dashed"/>
+  </svg>
+  <figcaption>Оля і Іван підключені до різних chat-серверів. Повідомлення зберігається (durability), потім через pub/sub і реєстр сесій маршрутизується на потрібний сервер. Офлайн — push.</figcaption>
+</figure>
+
+<h3>Глибоке занурення: зберігання і порядок</h3>
+<p>700 TB повідомлень із патерном «завжди читаємо останні N повідомлень одного чату» — це ідеальний випадок для <b>wide-column</b> БД (Cassandra/ScyllaDB): партиція за <code>chat_id</code>, сортування за <code>message_id</code> всередині партиції. Читання «останні 50 повідомлень чату» — один seek на диску. Discord саме так зберігає трильйони повідомлень (спочатку Cassandra, потім ScyllaDB), додавши <b>bucket</b> за часом у ключ партиції, щоб дуже активні чати не створювали гігантські партиції:</p>
+<pre><code class="language-sql">CREATE TABLE messages (
+  chat_id     bigint,
+  bucket      int,          -- номер 10-денного вікна: щоб партиція не росла безмежно
+  message_id  bigint,       -- Snowflake id: час + датацентр + лічильник → впорядкований
+  author_id   bigint,
+  content     text,
+  PRIMARY KEY ((chat_id, bucket), message_id)
+) WITH CLUSTERING ORDER BY (message_id DESC);</code></pre>
+<p><b>Порядок:</b> id генеруємо як Snowflake (41 біт часу + 10 біт машини + 12 біт лічильника) — монотонний у межах одного генератора і «майже» глобально. Для строгого порядку в чаті достатньо, щоб усі повідомлення одного чату проходили через одну партицію Kafka (ключ = chat_id).</p>
+
+<h3>Доставка і статуси</h3>
+<ol>
+  <li>Клієнт шле з <code>clientMsgId</code> (ідемпотентність: при обриві зв'язку повторить — сервер не створить дубль).</li>
+  <li>Сервер зберігає в Cassandra, відповідає <code>ack</code> → у відправника одна галочка (<b>sent</b>).</li>
+  <li>Через реєстр сесій (Redis: <code>user_id → chat_server_id</code>) знаходимо сервер одержувача, доставляємо через WS. Одержувач відповідає <code>delivered</code> → дві галочки.</li>
+  <li>Одержувач відкрив чат → <code>read</code> → сині галочки. Статуси — окрема легка таблиця/потік, не змінюємо саме повідомлення.</li>
+  <li>Одержувач офлайн → повідомлення чекає в БД, шлемо push через APNs/FCM (тільки «у вас 3 нові повідомлення», без тексту — приватність). При підключенні клієнт синхронізує через <code>GET /messages?after=lastSeenId</code>.</li>
+</ol>
+<h3>Групи і fan-out</h3>
+<p>Група на 500 людей: одне повідомлення → 500 доставок. Message service публікує один раз у топік, а chat-сервери, що тримають учасників групи, підписані. Для великих каналів (100 K підписників) fan-out робить окремий пул воркерів, і доставка стає «eventual» — секунди, не мілісекунди; це прийнятно.</p>
+<h3>Presence</h3>
+<p>Клієнт шле heartbeat кожні 30 с; Redis-ключ <code>presence:u_1</code> з TTL 60 с. Немає ключа — офлайн. Розсилати зміни presence всім друзям — дорого (10 M × 200 друзів); тому робимо ліниво: статус запитується тільки для відкритого чату/списку, з кешем на 10 с.</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>Sticky sessions</b> для WebSocket: з'єднання живе на одному сервері, тому LB має тримати «прилипання» (L4 balancing або consistent hashing), а реєстр сесій має оновлюватись при реконекті.</li>
+    <li><b>Втрата повідомлення між ack і доставкою.</b> Якщо ack надіслано до збереження в БД — при падінні сервера повідомлення зникне. Спершу durable write, потім ack. Завжди.</li>
+    <li><b>Reconnect storm:</b> якщо chat-сервер із 100 K з'єднань перезапустився, 100 K клієнтів одночасно перепідключаються. Клієнт має робити exponential backoff із jitter.</li>
+  </ul>
+</div>
+
+<h2 id="s9">9. Кейс C: стрічка новин (Twitter / Facebook feed)</h2>
+<h3>Вимоги</h3>
+<p><b>Функціональні:</b> постити (текст + опційно медіа); стрічка з постів тих, на кого підписаний, у хронологічному або ранжованому порядку; підписки. <b>Нефункціональні:</b> стрічка відкривається &lt; 300 мс; eventual consistency допустима (пост може з'явитись у друзів через кілька секунд); 100 M DAU, read : write = 50 : 1; є «знаменитості» з 10 M підписників.</p>
+<h3>Оцінка</h3>
+<p>Читання стрічки: 100 M × 10 відкриттів ÷ 10⁵ = <b>10 000 QPS</b>, пік 30 000. Пости: 100 M × 0,2 ÷ 10⁵ = <b>200 постів/с</b>. Зберігання стрічок у кеші: 100 M користувачів × 500 останніх post_id × 8 байт = <b>400 GB</b> Redis — реально (кластер).</p>
+<h3>Головний вибір: fan-out on write vs fan-out on read</h3>
+
+<figure>
+  <svg viewBox="0 0 760 360" role="img" aria-label="Порівняння fan-out on write та fan-out on read">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="190" y="28" text-anchor="middle" class="bold">Fan-out on write (push)</text>
+    <rect x="130" y="45" width="120" height="44" rx="12" class="accent"/>
+    <text x="190" y="72" text-anchor="middle" class="small">Оля постить</text>
+    <path d="M190 89 L190 125" class="arrow"/>
+    <rect x="110" y="128" width="160" height="44" rx="12" class="purple"/>
+    <text x="190" y="155" text-anchor="middle" class="small">Черга → fan-out worker</text>
+    <path d="M150 172 L60 220" class="arrow"/>
+    <path d="M190 172 L190 220" class="arrow"/>
+    <path d="M230 172 L320 220" class="arrow"/>
+    <rect x="15" y="225" width="90" height="40" rx="10" class="red"/>
+    <text x="60" y="250" text-anchor="middle" class="small">feed:u1</text>
+    <rect x="145" y="225" width="90" height="40" rx="10" class="red"/>
+    <text x="190" y="250" text-anchor="middle" class="small">feed:u2</text>
+    <rect x="275" y="225" width="90" height="40" rx="10" class="red"/>
+    <text x="320" y="250" text-anchor="middle" class="small">feed:u3 …</text>
+    <text x="190" y="295" text-anchor="middle" class="muted">Запис: дорогий (×підписники)</text>
+    <text x="190" y="313" text-anchor="middle" class="muted">Читання: O(1) — готовий список у Redis</text>
+    <text x="190" y="340" text-anchor="middle" class="muted">Проблема: 10 M підписників = 10 M записів</text>
+    <path d="M385 40 L385 350" class="arrow dashed"/>
+    <text x="575" y="28" text-anchor="middle" class="bold">Fan-out on read (pull)</text>
+    <rect x="515" y="45" width="120" height="44" rx="12" class="accent"/>
+    <text x="575" y="72" text-anchor="middle" class="small">Іван відкрив стрічку</text>
+    <path d="M575 89 L575 125" class="arrow"/>
+    <rect x="495" y="128" width="160" height="44" rx="12" class="blue"/>
+    <text x="575" y="155" text-anchor="middle" class="small">Feed service: кого читає?</text>
+    <path d="M535 172 L445 220" class="arrow"/>
+    <path d="M575 172 L575 220" class="arrow"/>
+    <path d="M615 172 L705 220" class="arrow"/>
+    <rect x="400" y="225" width="90" height="40" rx="10" class="green"/>
+    <text x="445" y="250" text-anchor="middle" class="small">posts:Оля</text>
+    <rect x="530" y="225" width="90" height="40" rx="10" class="green"/>
+    <text x="575" y="250" text-anchor="middle" class="small">posts:Петро</text>
+    <rect x="660" y="225" width="90" height="40" rx="10" class="green"/>
+    <text x="705" y="250" text-anchor="middle" class="small">posts: …×500</text>
+    <text x="575" y="295" text-anchor="middle" class="muted">Запис: O(1) — один INSERT</text>
+    <text x="575" y="313" text-anchor="middle" class="muted">Читання: дороге — merge 500 списків</text>
+    <text x="575" y="340" text-anchor="middle" class="muted">Проблема: 300 мс не вкластись при 30 K QPS</text>
+  </svg>
+  <figcaption>Push готує стрічку заздалегідь і робить читання дешевим; pull робить дешевим запис. Читання в 50 разів частіше — тому базовий вибір push.</figcaption>
+</figure>
+
+<p><b>Гібрид для знаменитостей.</b> Push для звичайних користувачів (до ~10 K підписників): пост → черга → воркери дописують post_id у Redis-список кожного підписника (<code>LPUSH feed:u_42 post_id; LTRIM 0 499</code>). Для celebrity (10 M підписників) push означав би 10 M записів на один твіт — ні. Їхні пости <b>не розсилаються</b>; замість цього при читанні стрічки Feed service бере готовий список із Redis і <b>домішує</b> (merge) останні пости знаменитостей, на яких підписаний користувач (їх зазвичай кілька десятків, це швидко). Так працював Twitter.</p>
+<h3>Дані і кеш</h3>
+<pre><code class="language-text">posts (Postgres, шард за user_id):  post_id (Snowflake), user_id, text, media_url, created_at
+follows (Postgres або графова):     follower_id, followee_id, PRIMARY KEY (follower_id, followee_id)
+Redis:
+  feed:{user_id}        LIST post_id (останні 500)      -- сама стрічка
+  post:{post_id}        HASH {text, user_id, media…}    -- вміст, щоб не ходити в БД
+  user:{user_id}        HASH {name, avatar}             -- для рендеру</code></pre>
+<p>Читання стрічки: <code>LRANGE feed:u_42 0 19</code> → 20 post_id → <code>MGET post:*</code> (одна команда) → підтягнути авторів → віддати. Два round-trip до Redis, ~5 мс. Неактивні користувачі (не заходили 30 днів) не мають стрічки в кеші — при вході для них робимо fan-out on read один раз і кешуємо.</p>
+<h3>Ranking</h3>
+<p>Хронологія проста, але продукти хочуть «цікаве спочатку». Ранжування (ranking) — окремий сервіс: бере 500 кандидатів із кешу, для кожного рахує score (свіжість, лайки друзів, автор, з яким взаємодієш) через легку ML-модель або евристику, сортує. Робиться при читанні, тому має вкладатись у 50–100 мс; важкі ознаки (features) обчислюються заздалегідь воркерами.</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Реалізуй міні-стрічку на Node + Redis: <code>POST /posts</code> робить <code>LPUSH</code> у feed кожного підписника (з масиву в пам'яті), <code>GET /feed</code> читає <code>LRANGE</code> + <code>MGET</code>.</li>
+    <li>Створи «знаменитість» із 100 000 підписників і виміряй час запису. Потім реалізуй гібрид: для неї не робити push, а домішувати при читанні. Порівняй.</li>
+    <li>Додай <code>LTRIM</code> і подумай: що робити, коли користувач хоче прокрутити стрічку за межі 500 постів?</li>
+  </ol>
+</div>
+
+<h2 id="s10">10. Кейс D: фото-сервіс (Instagram)</h2>
+<h3>Вимоги</h3>
+<p><b>Функціональні:</b> завантажити фото (до 10 MB); переглянути фото користувача і стрічку; лайки. <b>Нефункціональні:</b> фото ніколи не губляться (durability 11 дев'яток); перегляд швидкий по всьому світу; 50 M DAU, 5 M завантажень на день; read : write = 100 : 1.</p>
+<h3>Оцінка</h3>
+<p>Завантажень: 5 M ÷ 10⁵ = <b>50/с</b>, пік 150. Storage: 5 M × 2 MB (оригінал) = <b>10 TB/день</b> → 5 років ≈ 18 PB. Плюс 3 розміри превʼю по ~100 KB — ще 1,5 TB/день. Це виключно object storage. Перегляди: 50 M × 30 фото ÷ 10⁵ = 15 000 QPS × 100 KB = <b>1,5 GB/s</b> вихідного трафіку — тільки через CDN.</p>
+
+<figure>
+  <svg viewBox="0 0 760 400" role="img" aria-label="Архітектура фото-сервісу: upload через presigned URL, обробка через чергу, CDN">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="15" y="40" width="110" height="60" rx="12" class="accent"/>
+    <text x="70" y="75" text-anchor="middle" class="bold">Клієнт</text>
+    <path d="M125 60 L245 60" class="arrow"/>
+    <text x="185" y="48" text-anchor="middle" class="small">1. POST /uploads</text>
+    <rect x="250" y="30" width="140" height="60" rx="12" class="blue"/>
+    <text x="320" y="55" text-anchor="middle" class="bold">API</text>
+    <text x="320" y="75" text-anchor="middle" class="small">→ presigned URL</text>
+    <path d="M245 80 L125 80" class="arrow"/>
+    <text x="185" y="98" text-anchor="middle" class="small">2. {url, photoId}</text>
+    <path d="M70 100 L70 190" class="arrow"/>
+    <text x="150" y="150" text-anchor="middle" class="small">3. PUT файл напряму</text>
+    <text x="150" y="166" text-anchor="middle" class="small">(минаючи API!)</text>
+    <rect x="15" y="195" width="140" height="70" rx="12" class="accent"/>
+    <text x="85" y="222" text-anchor="middle" class="bold">S3: originals/</text>
+    <text x="85" y="242" text-anchor="middle" class="small">18 PB, 11 дев'яток</text>
+    <path d="M155 230 L245 230" class="arrow"/>
+    <text x="200" y="218" text-anchor="middle" class="small">4. event</text>
+    <rect x="250" y="200" width="120" height="60" rx="12" class="purple"/>
+    <text x="310" y="225" text-anchor="middle" class="bold">Черга</text>
+    <text x="310" y="245" text-anchor="middle" class="small">photo.uploaded</text>
+    <path d="M370 230 L450 230" class="arrow"/>
+    <rect x="455" y="195" width="150" height="70" rx="12" class="purple"/>
+    <text x="530" y="220" text-anchor="middle" class="bold">Image workers</text>
+    <text x="530" y="238" text-anchor="middle" class="small">resize 3 розміри, EXIF,</text>
+    <text x="530" y="254" text-anchor="middle" class="small">NSFW-перевірка</text>
+    <path d="M530 265 L530 310" class="arrow"/>
+    <rect x="455" y="315" width="150" height="60" rx="12" class="accent"/>
+    <text x="530" y="340" text-anchor="middle" class="bold">S3: thumbs/</text>
+    <text x="530" y="360" text-anchor="middle" class="small">150 / 480 / 1080 px</text>
+    <path d="M605 225 L660 225" class="arrow"/>
+    <rect x="620" y="195" width="125" height="70" rx="12" class="green"/>
+    <text x="682" y="220" text-anchor="middle" class="bold">Postgres</text>
+    <text x="682" y="238" text-anchor="middle" class="small">photos, шард за</text>
+    <text x="682" y="254" text-anchor="middle" class="small">user_id; status=ready</text>
+    <path d="M605 345 L660 345" class="arrow"/>
+    <rect x="620" y="315" width="125" height="60" rx="12" class="green"/>
+    <text x="682" y="340" text-anchor="middle" class="bold">CDN</text>
+    <text x="682" y="360" text-anchor="middle" class="small">cdn.example/p/…</text>
+    <path d="M660 375 L110 385 L70 300" class="arrow dashed"/>
+    <text x="330" y="395" text-anchor="middle" class="small">5. перегляд: GET через CDN, кеш hit ≈ 95 %</text>
+    <path d="M390 60 L660 60 L682 195" class="arrow dashed"/>
+    <text x="520" y="50" text-anchor="middle" class="small">запис метаданих status=pending</text>
+  </svg>
+  <figcaption>Файл ніколи не проходить через API-сервер — клієнт вантажить напряму в S3 за підписаним URL. API лише видає дозвіл і зберігає метадані; обробка асинхронна.</figcaption>
+</figure>
+
+<h3>Глибоке занурення: upload через presigned URL</h3>
+<p>Якби 10-мегабайтні файли йшли через API-сервери, нам знадобились би сотні серверів, що просто перекачують байти. Замість цього API генерує <b>presigned URL</b> — тимчасове (наприклад 15 хв) посилання з підписом, яке дозволяє <code>PUT</code> одного конкретного ключа в S3. Клієнт вантажить напряму в object storage, який для цього і створений.</p>
+<pre><code class="language-js">// POST /uploads — видаємо дозвіл на завантаження
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+const s3 = new S3Client({ region: "eu-central-1" });
+
+app.post("/uploads", auth, async (req, res) =&gt; {
+  const photoId = snowflake.next();
+  const key = `originals/${req.user.id}/${photoId}.jpg`;
+  await db.insert(photos).values({ id: photoId, userId: req.user.id, key, status: "pending" });
+
+  const url = await getSignedUrl(s3, new PutObjectCommand({
+    Bucket: "photos-prod", Key: key,
+    ContentType: "image/jpeg",
+    ContentLength: req.body.size,      // обмежуємо розмір ще на рівні підпису
+  }), { expiresIn: 900 });             // 15 хвилин
+
+  res.json({ photoId, uploadUrl: url });
+});
+
+// Клієнт: fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": "image/jpeg" } })
+// S3 після успішного PUT кидає подію в SQS/SNS → воркери обробляють → status = "ready"</code></pre>
+<h3>Обробка і дані</h3>
+<p>Воркер отримує подію, качає оригінал, робить 3 розміри (sharp у Node), кладе в <code>thumbs/</code>, оновлює <code>status = ready</code> і публікує <code>photo.ready</code> для fan-out у стрічку (кейс C). Якщо воркер впав посеред роботи — подія повернеться в чергу (visibility timeout), обробка ідемпотентна (перезапис тих самих ключів).</p>
+<pre><code class="language-sql">-- Postgres, шардінг за user_id (усі фото користувача на одному шарді → профіль читається з одного місця)
+CREATE TABLE photos (
+  id         bigint PRIMARY KEY,      -- Snowflake: час у старших бітах → сортування за часом безкоштовно
+  user_id    bigint NOT NULL,
+  key        text   NOT NULL,         -- originals/{user}/{id}.jpg
+  status     text   NOT NULL,         -- pending | ready | rejected
+  caption    text,
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX ON photos (user_id, id DESC);   -- «фото користувача, найновіші спочатку»
+
+-- Лайки: лічильник денормалізовано (щоб не COUNT(*) на кожен показ)
+CREATE TABLE likes (photo_id bigint, user_id bigint, PRIMARY KEY (photo_id, user_id));
+ALTER TABLE photos ADD COLUMN like_count int DEFAULT 0;   -- оновлюється async, eventual — і це ок</code></pre>
+<h3>Масштабування і trade-offs</h3>
+<ul>
+  <li><b>CDN</b> бере 95 % переглядів; URL превʼю незмінні (immutable) → <code>Cache-Control: max-age=31536000</code>.</li>
+  <li><b>Шардінг за user_id</b> робить профіль швидким, але «стрічка» потребує фото з різних шардів — саме тому стрічку збираємо окремо в Redis (кейс C), а не JOIN-ом по шардах.</li>
+  <li><b>Гарячий шард:</b> знаменитість із 100 M переглядів профілю — її метадані кешуємо в Redis із TTL, а фото і так у CDN.</li>
+  <li><b>Видалення:</b> soft delete у БД одразу, фізичне видалення з S3 — воркером; CDN-інвалідація коштує грошей, тому робимо через зміну URL (versioned key) або чекаємо TTL.</li>
+</ul>
+
+<h2 id="s11">11. Кейс E: rate limiter</h2>
+<p>Коротший кейс, який часто дають як «розминку». <b>Вимоги:</b> обмежити клієнта до N запитів за вікно (100/хв на user_id або IP); точність; мінімальна латентність (це на шляху кожного запиту!); працює для всіх копій API (розподілений).</p>
+<h3>Де розмістити</h3>
+<p>На API gateway / у middleware перед бізнес-логікою. Стан — у Redis (спільний для всіх копій, атомарні операції, TTL). Відповідь при перевищенні: <code>429 Too Many Requests</code> + заголовки <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code>, <code>Retry-After</code>.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Алгоритми rate limiting: fixed window, sliding window log, token bucket">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="125" y="30" text-anchor="middle" class="bold">Fixed window</text>
+    <rect x="20" y="45" width="100" height="40" rx="8" class="blue"/>
+    <rect x="130" y="45" width="100" height="40" rx="8" class="blue"/>
+    <text x="70" y="70" text-anchor="middle" class="small">12:00–12:01</text>
+    <text x="180" y="70" text-anchor="middle" class="small">12:01–12:02</text>
+    <text x="110" y="105" class="mono">100 @12:00:59</text>
+    <text x="110" y="122" class="mono">100 @12:01:01</text>
+    <text x="125" y="145" text-anchor="middle" class="muted">→ 200 за 2 с. Просто, але</text>
+    <text x="125" y="160" text-anchor="middle" class="muted">«стрибок» на межі вікон</text>
+    <path d="M255 40 L255 170" class="arrow dashed"/>
+    <text x="380" y="30" text-anchor="middle" class="bold">Sliding window</text>
+    <rect x="290" y="45" width="180" height="40" rx="8" class="green"/>
+    <text x="380" y="70" text-anchor="middle" class="small">останні 60 с від «зараз»</text>
+    <path d="M290 95 L470 95" class="arrow"/>
+    <text x="380" y="115" text-anchor="middle" class="mono">ZADD ts; ZREMRANGEBYSCORE</text>
+    <text x="380" y="132" text-anchor="middle" class="mono">ZCARD ≤ 100 ?</text>
+    <text x="380" y="152" text-anchor="middle" class="muted">Точно, але O(N) пам'яті на ключ</text>
+    <path d="M510 40 L510 170" class="arrow dashed"/>
+    <text x="635" y="30" text-anchor="middle" class="bold">Token bucket</text>
+    <rect x="585" y="45" width="100" height="70" rx="10" class="accent"/>
+    <text x="635" y="70" text-anchor="middle" class="small">🪣 tokens: 37</text>
+    <text x="635" y="90" text-anchor="middle" class="small">cap 100</text>
+    <path d="M635 20 L635 45" class="arrow"/>
+    <text x="700" y="35" class="small">+1.67/с</text>
+    <path d="M635 115 L635 140" class="arrow"/>
+    <text x="700" y="135" class="small">−1/запит</text>
+    <text x="635" y="160" text-anchor="middle" class="muted">Дозволяє burst, O(1) пам'яті</text>
+    <text x="380" y="215" text-anchor="middle" class="bold">Розподілено: Redis + Lua-скрипт (атомарно) на кожній копії API</text>
+    <rect x="130" y="235" width="120" height="40" rx="10" class="blue"/>
+    <text x="190" y="260" text-anchor="middle" class="small">API #1</text>
+    <rect x="320" y="235" width="120" height="40" rx="10" class="blue"/>
+    <text x="380" y="260" text-anchor="middle" class="small">API #2</text>
+    <rect x="510" y="235" width="120" height="40" rx="10" class="red"/>
+    <text x="570" y="260" text-anchor="middle" class="small">Redis: rl:{user}</text>
+    <path d="M250 255 L510 255" class="arrow"/>
+    <path d="M440 245 L510 245" class="arrow"/>
+  </svg>
+  <figcaption>Три алгоритми. Token bucket — стандарт де-факто (AWS, Stripe): пропускає короткі сплески, але тримає середню швидкість.</figcaption>
+</figure>
+
+<pre><code class="language-js">// Token bucket у Redis, атомарно через Lua (усі копії API бачать один стан)
+const LUA = `
+  local key, cap, rate, now, cost = KEYS[1], tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), tonumber(ARGV[4])
+  local b = redis.call('HMGET', key, 'tokens', 'ts')
+  local tokens = tonumber(b[1]) or cap
+  local ts = tonumber(b[2]) or now
+  tokens = math.min(cap, tokens + (now - ts) * rate)   -- доливаємо токени за минулий час
+  local allowed = tokens &gt;= cost
+  if allowed then tokens = tokens - cost end
+  redis.call('HSET', key, 'tokens', tokens, 'ts', now)
+  redis.call('EXPIRE', key, math.ceil(cap / rate) * 2)
+  return { allowed and 1 or 0, math.floor(tokens) }
+`;
+export async function rateLimit(redis, userId, { cap = 100, ratePerSec = 100 / 60 } = {}) {
+  const [allowed, remaining] = await redis.eval(LUA, 1, `rl:${userId}`, cap, ratePerSec, Date.now() / 1000, 1);
+  return { allowed: allowed === 1, remaining };
+}</code></pre>
+<p><b>Trade-offs:</b> якщо Redis недоступний — пропускати (fail-open, ризик перевантаження) чи блокувати (fail-closed, ризик відмовити всім)? Для публічного API зазвичай fail-open з алертом. Для точності «глобально» при кількох регіонах — локальні лічильники + періодична синхронізація (невелика похибка прийнятна).</p>
+
+<h2 id="s12">12. Як говорити на співбесіді</h2>
+<h3>Структура 45 хвилин</h3>
+<ol class="steps">
+  <li><b>0–5 хв. Вимоги.</b> Повторіть задачу своїми словами, задайте 5–7 питань, зафіксуйте scope на дошці: «робимо: … не робимо: …».</li>
+  <li><b>5–10 хв. Оцінка.</b> DAU → QPS → storage → чи потрібен кеш/шардінг. Пишіть числа на дошці, вголос округлюйте.</li>
+  <li><b>10–25 хв. Схема + API + дані.</b> Малюйте зліва направо. Спочатку простий варіант, який працює. Пройдіть один запит читання і один запис уголос.</li>
+  <li><b>25–40 хв. Глибоке занурення.</b> Спитайте: «Куди варто заглибитись — у зберігання чи доставку?» Для кожного вузького місця — два варіанти і чому обираєте цей.</li>
+  <li><b>40–45 хв. Підсумок.</b> Bottlenecks, які лишились; що б зробили наступним; як моніторити (розділ 15) — це сильне завершення.</li>
+</ol>
+<h3>Що промовляти вголос</h3>
+<ul>
+  <li>«Я припускаю, що … — це правильно?» — кожне припущення.</li>
+  <li>«Тут два варіанти: A дає …, B дає …; для наших вимог обираю A, бо …» — кожен вибір.</li>
+  <li>«Це стане вузьким місцем при …, тоді зробимо …» — кожен блок.</li>
+  <li>«Що станеться, якщо цей компонент впаде?» — самі, не чекаючи.</li>
+</ul>
+<h3>Типові помилки</h3>
+<ul>
+  <li>Мовчати 5 хвилин, малюючи. Інтерв'юер оцінює хід думки, а не малюнок.</li>
+  <li>Одразу «Kafka + Cassandra + Kubernetes» для 10 000 користувачів. Overengineering — червоний прапор.</li>
+  <li>Не називати чисел. «Багато користувачів» — це не оцінка.</li>
+  <li>Знати назви, не знати «чому». Якщо кажете «Redis» — будьте готові пояснити витіснення, персистентність і що буде при падінні.</li>
+  <li>Ігнорувати підказки. Якщо інтерв'юер каже «а якщо це знаменитість?» — це не пастка, а запрошення до найцікавішої частини.</li>
+  <li>Захищати перше рішення до кінця. Змінити думку, отримавши нову інформацію, — це плюс.</li>
+</ul>
+<h3>Чек-лист питань інтерв'юера (готуйте відповіді заздалегідь)</h3>
+<ul class="checklist">
+  <li>Скільки користувачів і який read/write ratio?</li>
+  <li>Як генеруєте унікальні id у розподіленій системі?</li>
+  <li>Що станеться, якщо кеш впаде? Як уникнути cache stampede?</li>
+  <li>За яким ключем шардуєте і чому? Що з гарячими ключами?</li>
+  <li>Де тут eventual consistency і чи прийнятна вона для користувача?</li>
+  <li>Як забезпечити, що повідомлення/подія не загубиться і не обробиться двічі (at-least-once + ідемпотентність)?</li>
+  <li>Як деплоїте без даунтайму? Як відкочуєте?</li>
+  <li>Які метрики і алерти поставите першими?</li>
+  <li>Що зробите, якщо трафік зросте ×10 за ніч?</li>
+  <li>Де single point of failure на вашій схемі?</li>
+</ul>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Співбесіда з system design — єдиний етап, де перевіряють не «чи знає», а «чи думає як інженер». Її не можна «зазубрити», але можна натренувати, як м'яз: методологія + 10–15 розібраних кейсів + практика вголос дають впевненість, яка помітна з перших хвилин. І цей самий м'яз потім щодня економить вам тижні — коли ви <i>не</i> додаєте чергу, бо порахували, що cron впорається.</p>
+</div>
+
+<h2 id="s13">13. Як тренуватись</h2>
+<ol>
+  <li><b>Прочитайте system-design-primer</b> від початку до кінця, а потім 5–6 розділів Alex Xu. Це база термінів.</li>
+  <li><b>Розбирайте один кейс на тиждень</b> за методологією: пишіть від руки вимоги, оцінку, малюйте схему. Потім читайте, як це зробили насправді (engineering-блоги), і порівнюйте.</li>
+  <li><b>Говоріть уголос.</b> Ставте таймер на 45 хв, записуйте себе на відео або тренуйтесь із другом (pramp, hellointerview mock). Мовчазне проєктування не готує до живого.</li>
+  <li><b>Будуйте маленькі версії.</b> URL shortener із Redis, чат на WebSocket, стрічка з fan-out — по вихідних. Реальний код виявляє питання, яких не видно на папері.</li>
+  <li><b>Читайте постмортеми і блоги:</b> Discord, Instagram, Cloudflare, Netflix — там trade-offs пояснені людьми, які за них заплатили.</li>
+  <li><b>Повертайтесь до попередніх розділів:</b> кожен кейс тут спирається на 12 (кеш), 13 (черги), 14 (шардінг, CAP), 15 (observability). Слабке місце в базі проявиться на dive deep.</li>
+</ol>
+
+<div class="box try">
+  <div class="title">Спробуй сам: повний кейс</div>
+  <ol>
+    <li>Візьми задачу «спроєктуй Google Docs (спільне редагування)» або «спроєктуй Uber (матчинг водіїв)». Дай собі рівно 45 хвилин і пройди всі 4 кроки на папері.</li>
+    <li>Запиши 5 питань, які ти поставив би інтерв'юеру, до того як щось малювати.</li>
+    <li>Для кожного блоку на своїй схемі напиши одним рядком: «якщо впаде — тоді …».</li>
+    <li>Порівняй із розбором на hellointerview або ByteByteGo. Що пропустив? Що переускладнив?</li>
+  </ol>
+</div>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>«Правильна відповідь» з YouTube.</b> Завчена схема Twitter не допоможе, коли спитають «а тепер Twitter для 1000 користувачів у одній компанії» — і рішення має бути на порядок простішим.</li>
+    <li><b>Плутати «масштабується» з «потрібно масштабувати».</b> Один Postgres на хорошому сервері обслуговує десятки тисяч QPS. Більшість стартапів ніколи не переростуть його.</li>
+    <li><b>Забувати про дані.</b> Схема з квадратиками без моделі даних і ключа шардінгу — це декорація. Половина складності живе у «як зберігаємо».</li>
+    <li><b>Не називати компромісів.</b> Будь-яке рішення без «але» звучить як незнання альтернатив.</li>
+  </ul>
+</div>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Наступний рівень — думати про <b>еволюцію</b> системи, а не лише про кінцевий стан. Реальні системи не народжуються з шардами: спершу моноліт + Postgres + Redis; при 10× трафіку — read replicas і CDN; при 100× — виділяємо write-heavy частини (повідомлення, події) у спеціалізоване сховище і чергу; при 1000× — шардінг і регіони. На співбесіді рівня staff цінують саме це: «ось простий варіант на сьогодні, ось що зміниться на кожному порядку величини, і ось які рішення я приймаю зараз, щоб міграція потім була безболісною (наприклад, Snowflake id з першого дня, щоб шардінг не вимагав перегенерації ключів)». Також вивчіть <b>consistent hashing</b>, <b>CRDT</b> для спільного редагування, <b>geohash / quadtree</b> для геопошуку і <b>Bloom filter</b> для «чи є ключ» — ці чотири структури закривають ще з десяток типових кейсів (Uber, Google Docs, Yelp, веб-краулер).</p>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чому треба почати з питань, а не зі схеми?</summary><p>Задача навмисно розмита; без вимог не зрозуміло, чи потрібен кеш, шардінг, черга. Read/write ratio, масштаб, вимоги до консистентності і латентності повністю змінюють архітектуру. Питання показують інженерне мислення і звужують scope до того, що влізе у 45 хвилин.</p></details>
+  <details><summary>2. Порахуйте QPS для 20 M DAU, 5 дій на день. Який пік?</summary><p>20 M × 5 ÷ 86 400 ≈ 10⁸ ÷ 10⁵ = ~1 000 QPS середній (точніше 1 157). Пік ×2–3 ≈ 2 000–3 500 QPS.</p></details>
+  <details><summary>3. Коли обрати fan-out on write, а коли on read?</summary><p>On write (push) — коли читання набагато частіше за запис і підписників у авторів небагато: стрічка готова заздалегідь, читання O(1). On read (pull) — коли запис частий або є автори з мільйонами підписників, для яких push занадто дорогий. На практиці гібрид: push для звичайних, pull-домішування для знаменитостей.</p></details>
+  <details><summary>4. 301 чи 302 для URL shortener і чому?</summary><p>302 (або 307), якщо потрібна аналітика кліків або можливість змінити ціль — браузер щоразу проходить через сервіс. 301 кешується браузером назавжди: менше навантаження, але ми втрачаємо кліки і контроль.</p></details>
+  <details><summary>5. Чому в чаті ключ партиції — chat_id, а у фото-сервісі — user_id?</summary><p>Ключ обирають за головним патерном читання. Чат завжди читається як «останні N повідомлень цього чату» → усі повідомлення чату мають лежати поруч. Фото читаються як «профіль користувача» → усі фото користувача на одному шарді. Неправильний ключ = scatter-gather по всіх шардах на кожен запит.</p></details>
+  <details><summary>6. Навіщо presigned URL і що буде, якщо вантажити фото через API?</summary><p>Presigned URL дозволяє клієнту писати напряму в object storage, минаючи API. Через API кожен сервер перекачував би мегабайти, блокуючи воркери і мережу — знадобились би десятки серверів просто для проксування байтів, плюс подвійний трафік.</p></details>
+  <details><summary>7. Чому token bucket кращий за fixed window?</summary><p>Fixed window дозволяє подвійний ліміт на межі вікон (100 запитів о 12:00:59 і ще 100 о 12:01:01). Token bucket поповнюється рівномірно, тримає середню швидкість, дозволяє короткі сплески в межах місткості і потребує O(1) пам'яті на клієнта.</p></details>
+  <details><summary>8. Що таке Snowflake id і чому він зручний для шардінгу?</summary><p>64-бітний id: ~41 біт мітки часу + біти id генератора/машини + лічильник. Генерується локально без координації, унікальний глобально, впорядкований за часом (можна сортувати без окремої колонки created_at) і не залежить від auto-increment однієї БД — тому при шардінгу не треба перегенерувати ключі.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>System design — це не «намалювати Kafka», а прийняти рішення з компромісами під конкретні вимоги.</li>
+  <li>4 кроки: вимоги → оцінка → схема (API, дані, потік) → занурення з trade-offs.</li>
+  <li>Питання спочатку: функціональні, нефункціональні, масштаб, обмеження; явно зафіксуйте, що НЕ робите.</li>
+  <li>Оцінка на серветці: DAU × дії ÷ 10⁵ = QPS; пік ×2–3; storage × 2 000 за 5 років; кеш 20 %.</li>
+  <li>Знайте числа: RAM 100 нс, SSD 1 мс, Redis 0,5 мс, міжконтинентальний RTT 100+ мс, Postgres десятки тисяч QPS.</li>
+  <li>Будівельні блоки: DNS, CDN, LB, gateway, stateless сервіси, кеш, SQL/NoSQL, черга, object storage, пошук — і коли кожен НЕ потрібен.</li>
+  <li>Ключ шардінгу обирається за головним патерном читання (chat_id, user_id).</li>
+  <li>Read-heavy → денормалізуйте і кешуйте; довгі операції → async через чергу; realtime → push (WS).</li>
+  <li>URL shortener: KGS + base62, Redis для гарячих, 302 для аналітики.</li>
+  <li>Чат: durable write перед ack, реєстр сесій, Cassandra за chat_id, push для офлайн.</li>
+  <li>Стрічка: fan-out on write у Redis + pull-домішування для знаменитостей.</li>
+  <li>Фото: presigned URL → S3 → черга → воркери → CDN; метадані в SQL з шардом за user_id.</li>
+  <li>Rate limiter: token bucket у Redis через Lua; вирішіть fail-open чи fail-closed.</li>
+  <li>Говоріть уголос: припущення, альтернативи, «що якщо впаде», числа. Простий варіант спочатку.</li>
+  <li>Тренуйтесь: 1 кейс на тиждень, 45 хв за таймером, будуйте міні-версії.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://github.com/donnemartin/system-design-primer" target="_blank" rel="noopener">System Design Primer (donnemartin)</a> — головний безкоштовний ресурс: усі блоки, trade-offs, розбори кейсів, флеш-картки. Починайте звідси.</li>
+    <li><a href="https://bytebytego.com/" target="_blank" rel="noopener">ByteByteGo (Alex Xu)</a> — книги «System Design Interview» vol. 1–2 і блог з чудовими схемами; найближче до формату реальної співбесіди.</li>
+    <li><a href="https://dataintensive.net/" target="_blank" rel="noopener">Designing Data-Intensive Applications (Kleppmann)</a> — глибина під усіма кейсами: реплікація, партиціонування, консистентність, стріми. Книга №1 для senior.</li>
+    <li><a href="https://www.hellointerview.com/learn/system-design/in-a-hurry/introduction" target="_blank" rel="noopener">Hello Interview — System Design in a Hurry</a> — стислий гайд з фреймворком і розборами саме під співбесіду, з рівнями очікувань junior/senior/staff.</li>
+    <li><a href="https://www.educative.io/courses/grokking-the-system-design-interview" target="_blank" rel="noopener">Grokking the System Design Interview (educative)</a> — платний, але класичний курс із покроковими кейсами; корисний огляд типових задач.</li>
+    <li><a href="https://www.youtube.com/@ByteByteGo" target="_blank" rel="noopener">ByteByteGo YouTube</a> — 5–10-хвилинні анімовані пояснення кожного блоку і кейсу.</li>
+    <li><a href="https://www.youtube.com/@jordanhasnolife5163" target="_blank" rel="noopener">Jordan has no life (YouTube)</a> — глибокі розбори кейсів з акцентом на trade-offs зберігання, рівень senior+.</li>
+    <li><a href="http://highscalability.com/" target="_blank" rel="noopener">High Scalability</a> — архів «як побудований X» для сотень реальних систем.</li>
+    <li><a href="https://instagram-engineering.com/" target="_blank" rel="noopener">Instagram Engineering blog</a> — шардінг за user_id, генерація id в Postgres, як вони масштабували фото.</li>
+    <li><a href="https://discord.com/blog/how-discord-stores-trillions-of-messages" target="_blank" rel="noopener">Discord — How Discord stores trillions of messages</a> — реальний кейс B: Cassandra → ScyllaDB, гарячі партиції, bucket у ключі.</li>
+    <li><a href="https://www.infoq.com/presentations/Twitter-Timeline-Scalability/" target="_blank" rel="noopener">Twitter Timelines at Scale (InfoQ)</a> — оригінальна доповідь про fan-out on write і гібрид для знаменитостей.</li>
+    <li><a href="https://aws.amazon.com/architecture/" target="_blank" rel="noopener">AWS Architecture Center</a> — референсні архітектури і Well-Architected Framework; як «блоки» називаються в хмарі.</li>
+    <li><a href="https://cloud.google.com/architecture" target="_blank" rel="noopener">Google Cloud Architecture Center</a> — те саме від Google, з хорошими розділами про надійність.</li>
+    <li><a href="https://gist.github.com/vasanthk/485d1c25737e8e72759f" target="_blank" rel="noopener">System Design Cheatsheet (gist)</a> — конспект на одну сторінку: що питати, що малювати, які trade-offs.</li>
+    <li><a href="https://gist.github.com/jboner/2841832" target="_blank" rel="noopener">Latency Numbers Every Programmer Should Know</a> — таблиця затримок; вивчіть напам'ять для оцінок.</li>
+    <li><a href="https://blog.cloudflare.com/" target="_blank" rel="noopener">Cloudflare blog</a> — CDN, edge, rate limiting, DDoS і постмортеми від компанії, що бачить третину інтернету.</li>
+    <li><a href="https://roadmap.sh/system-design" target="_blank" rel="noopener">roadmap.sh — System Design</a> — візуальна карта тем для самоперевірки прогалин.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 16</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

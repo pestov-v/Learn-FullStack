@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>12. Кешування та продуктивність — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 12 · <span class="level-badge level-3">Про</span></div>
+  <h1>Кешування та продуктивність</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, де у fullstack-застосунку живуть кеші — від браузера до диска бази даних, — як ними керувати через HTTP-заголовки і Redis, чому інвалідація — це складно, і як вимірювати продуктивність так, щоб не обманювати себе середнім значенням.</p>
+  <div class="meta"><span>⏱ ~110 хв</span><span>📚 Передумови: розділи 01, 04, 05, 06, 08</span><span>🎯 Ціль: пришвидшити API нотаток у 10 разів і довести це перцентилями</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Кеш простими словами</a></li>
+    <li><a href="#s2">Ієрархія кешів</a></li>
+    <li><a href="#s3">HTTP-кешування: Cache-Control, ETag, 304</a></li>
+    <li><a href="#s4">CDN: кеш на краю мережі</a></li>
+    <li><a href="#s5">Серверний кеш: патерни і Redis</a></li>
+    <li><a href="#s6">Інвалідація і cache stampede</a></li>
+    <li><a href="#s7">Кеш на рівні бази даних</a></li>
+    <li><a href="#s8">Кеш на фронтенді: TanStack Query і Next.js</a></li>
+    <li><a href="#s9">Вимірювання: перцентилі, профілювання, EXPLAIN, N+1</a></li>
+    <li><a href="#s10">Фронтенд-продуктивність коротко</a></li>
+    <li><a href="#s11">Симптом → причина → інструмент</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>У тебе є улюблені іграшки, з якими ти граєшся щодня, і ті, що дістаєш раз на місяць. Якби всі іграшки лежали в коморі на горищі, ти б щоразу бігав по сходах туди-сюди. Тому улюблені лежать у коробці біля ліжка — під рукою. Ця коробка — кеш (cache): маленьке швидке місце для того, що потрібно часто.</p>
+  <p>Але є підступ. Мама переклала машинку з коробки на горище, а ти цього не знаєш і шукаєш її біля ліжка. Або в коробці лежить стара зламана машинка, хоча на горищі вже нова. Це «застарілий кеш». Найважче у кешах — не покласти річ у коробку, а вчасно зрозуміти, що вона там уже не та.</p>
+</div>
+
+<h2 id="s1">1. Кеш простими словами</h2>
+<p>Кеш — це копія даних, збережена ближче до того, хто їх потребує, або в швидшому сховищі, ніж оригінал. Оригінал (source of truth) — база даних, файл, результат важкого обчислення. Кеш — його тимчасова копія в пам'яті, на диску браузера, на сервері CDN за сотні кілометрів від вашого дата-центру.</p>
+<p>Три причини кешувати: <strong>швидкість</strong> (читання з оперативної пам'яті — наносекунди, з Redis по мережі — сотні мікросекунд, запит у Postgres — мілісекунди, HTTP до іншого континенту — сотні мілісекунд); <strong>зниження навантаження</strong> (якщо 10 000 користувачів дивляться одну й ту саму головну сторінку, база не повинна виконувати 10 000 однакових запитів); <strong>вартість</strong> (кожен виклик платного API чи хвилина CPU коштують грошей).</p>
+<p>І одна велика ціна: <strong>неузгодженість (staleness)</strong>. Кеш завжди трохи відстає від оригіналу. Уся інженерія кешування — це торгівля між свіжістю і швидкістю. Ключове питання перед кожним кешем: «Скільки секунд застарілості я можу собі дозволити для цих даних?» Для курсу валют на головній — хвилина нормально. Для балансу рахунку в момент оплати — нуль.</p>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Кешування — найпотужніший важіль продуктивності в бекенді, і водночас джерело найзагадковіших багів: «користувач бачить старі дані», «після деплою досі стара версія», «у мене оновилося, а в нього ні». Розуміти, де саме сидять кеші й хто ними керує, — це різниця між «я пришвидшив у 10 разів» і «я створив баг, який неможливо відтворити».</p>
+</div>
+
+<h2 id="s2">2. Ієрархія кешів</h2>
+<p>У типовому fullstack-застосунку запит проходить крізь кілька шарів, і кожен може відповісти з кешу, не пускаючи запит далі. Чим ближче до користувача спрацював кеш, тим дешевше і швидше.</p>
+
+<figure>
+  <svg viewBox="0 0 720 360" role="img" aria-label="Ієрархія кешів від браузера до диска бази даних">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="30" width="150" height="56" rx="12" class="blue"/>
+    <text x="95" y="53" text-anchor="middle" class="bold">Браузер</text>
+    <text x="95" y="73" text-anchor="middle" class="small">HTTP-кеш, memory</text>
+    <path d="M170 58 L210 58" class="arrow"/>
+    <rect x="210" y="30" width="150" height="56" rx="12" class="purple"/>
+    <text x="285" y="53" text-anchor="middle" class="bold">CDN</text>
+    <text x="285" y="73" text-anchor="middle" class="small">edge-нода поруч</text>
+    <path d="M360 58 L400 58" class="arrow"/>
+    <rect x="400" y="30" width="150" height="56" rx="12" class="accent"/>
+    <text x="475" y="53" text-anchor="middle" class="bold">Reverse proxy</text>
+    <text x="475" y="73" text-anchor="middle" class="small">nginx/Varnish кеш</text>
+    <path d="M550 58 L590 58" class="arrow"/>
+    <rect x="590" y="30" width="110" height="56" rx="12" class="green"/>
+    <text x="645" y="53" text-anchor="middle" class="bold">App</text>
+    <text x="645" y="73" text-anchor="middle" class="small">Node.js</text>
+    <path d="M645 86 L645 130" class="arrow"/>
+    <rect x="560" y="130" width="150" height="56" rx="12" class="red"/>
+    <text x="635" y="153" text-anchor="middle" class="bold">Redis</text>
+    <text x="635" y="173" text-anchor="middle" class="small">application cache</text>
+    <path d="M635 186 L635 230" class="arrow"/>
+    <rect x="560" y="230" width="150" height="56" rx="12" class="box-fill"/>
+    <text x="635" y="253" text-anchor="middle" class="bold">Postgres</text>
+    <text x="635" y="273" text-anchor="middle" class="small">shared_buffers, OS cache</text>
+    <path d="M635 286 L635 320" class="arrow"/>
+    <rect x="560" y="320" width="150" height="30" rx="8" class="box-fill" stroke-dasharray="4 3"/>
+    <text x="635" y="340" text-anchor="middle" class="small">Диск (SSD)</text>
+    <text x="95" y="120" text-anchor="middle" class="mono">~0 мс</text>
+    <text x="285" y="120" text-anchor="middle" class="mono">~10–30 мс</text>
+    <text x="475" y="120" text-anchor="middle" class="mono">~50–150 мс</text>
+    <text x="270" y="170" text-anchor="start" class="small">Кожен шар відповідає сам, якщо має свіжу копію,</text>
+    <text x="270" y="190" text-anchor="start" class="small">і лише при промаху (miss) передає запит далі.</text>
+    <text x="270" y="220" text-anchor="start" class="small">Хіт у браузері: 0 мережевих запитів.</text>
+    <text x="270" y="240" text-anchor="start" class="small">Хіт у CDN: сервер не задіяний взагалі.</text>
+    <text x="270" y="260" text-anchor="start" class="small">Хіт у Redis: база не задіяна.</text>
+    <text x="270" y="280" text-anchor="start" class="small">Хіт у shared_buffers: диск не задіяний.</text>
+    <text x="270" y="320" text-anchor="start" class="muted">Заголовки Cache-Control керують першими трьома шарами;</text>
+    <text x="270" y="340" text-anchor="start" class="muted">Redis і БД — ваш код і конфіг.</text>
+  </svg>
+  <figcaption>Шість шарів між користувачем і диском. Мета — щоб більшість запитів «відбивалися» якомога раніше.</figcaption>
+</figure>
+
+<ol>
+  <li><strong>Браузер</strong> — HTTP-кеш на диску (керується заголовками відповіді), кеш у пам'яті вкладки, кеш стану (TanStack Query, SWR), Service Worker.</li>
+  <li><strong>CDN</strong> — мережа серверів по світу; кешує статичні файли і, за бажанням, HTML/API-відповіді.</li>
+  <li><strong>Reverse proxy</strong> — nginx або Varnish перед застосунком можуть кешувати відповіді за тими самими HTTP-правилами.</li>
+  <li><strong>Application cache</strong> — Redis або пам'ять процесу: результати запитів, сесії, обчислення.</li>
+  <li><strong>База даних</strong> — Postgres тримає гарячі сторінки таблиць у <code>shared_buffers</code>, а ОС — у page cache; правильно налаштована база рідко читає з диска.</li>
+  <li><strong>Диск</strong> — куди запит доходить лише при промаху всіх рівнів.</li>
+</ol>
+
+<h2 id="s3">3. HTTP-кешування: Cache-Control, ETag, 304</h2>
+<p>HTTP-кеш описано у RFC 9111, і його поведінка визначається заголовками відповіді. Це найдешевший кеш, бо ним керує один рядок, а працює він у браузері, у CDN і в проксі одночасно.</p>
+
+<h3>Cache-Control</h3>
+<div class="table-wrap">
+<table>
+  <tr><th>Директива</th><th>Що означає</th><th>Коли використовувати</th></tr>
+  <tr><td><code>max-age=N</code></td><td>Відповідь свіжа N секунд; протягом цього часу браузер бере з кешу без запиту до сервера</td><td>Усе, що можна показувати трохи застарілим</td></tr>
+  <tr><td><code>s-maxage=N</code></td><td>Те саме, але лише для спільних кешів (CDN, проксі); має пріоритет над max-age для них</td><td>Коли CDN може тримати довше, ніж браузер</td></tr>
+  <tr><td><code>no-cache</code></td><td>Кешувати МОЖНА, але перед кожним використанням перевірити у сервера (умовний запит)</td><td>HTML-сторінки, API, де важлива свіжість, але хочеться економити трафік</td></tr>
+  <tr><td><code>no-store</code></td><td>Не зберігати взагалі, ніде</td><td>Персональні і чутливі дані: банківські виписки, токени</td></tr>
+  <tr><td><code>private</code></td><td>Кешувати може лише браузер користувача, не CDN</td><td>Відповіді, що залежать від того, хто залогінений</td></tr>
+  <tr><td><code>public</code></td><td>Кешувати можуть усі проміжні кеші</td><td>Статика, публічний контент</td></tr>
+  <tr><td><code>immutable</code></td><td>Файл ніколи не зміниться за цим URL; не перевіряти навіть при перезавантаженні</td><td>Файли з хешем у назві: <code>app.3f9a2c.js</code></td></tr>
+  <tr><td><code>stale-while-revalidate=N</code></td><td>Після закінчення max-age ще N секунд віддавати застаріле, паралельно оновлюючи у фоні</td><td>Майже все: користувач отримує миттєву відповідь, кеш оновлюється сам</td></tr>
+  <tr><td><code>must-revalidate</code></td><td>Після закінчення свіжості обов'язково перевірити, не віддавати застаріле навіть при недоступності сервера</td><td>Дані, де застарілість неприпустима</td></tr>
+</table>
+</div>
+
+<p>Важлива тонкість: <code>no-cache</code> не означає «не кешувати» — це означає «кешувати, але завжди питати сервер, чи актуально». «Не кешувати» — це <code>no-store</code>. Ця плутанина в назвах — джерело половини помилок з HTTP-кешем.</p>
+
+<h3>Умовні запити: ETag і Last-Modified</h3>
+<p>Коли відповідь застаріла (або стоїть <code>no-cache</code>), браузер не викидає її, а надсилає умовний запит (conditional request): «у мене є версія з таким-то ETag, вона ще актуальна?» ETag (entity tag) — це рядок-відбиток вмісту, зазвичай хеш. Якщо на сервері та сама версія — він відповідає <code>304 Not Modified</code> без тіла, і браузер використовує свою копію. Економія — весь обсяг тіла відповіді.</p>
+
+<figure>
+  <svg viewBox="0 0 720 330" role="img" aria-label="Послідовність умовного запиту з ETag і відповіддю 304">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="40" y="20" width="140" height="40" rx="10" class="blue"/>
+    <text x="110" y="45" text-anchor="middle" class="bold">Браузер</text>
+    <rect x="540" y="20" width="140" height="40" rx="10" class="green"/>
+    <text x="610" y="45" text-anchor="middle" class="bold">Сервер</text>
+    <line x1="110" y1="60" x2="110" y2="320" stroke="var(--muted)" stroke-dasharray="4 4"/>
+    <line x1="610" y1="60" x2="610" y2="320" stroke="var(--muted)" stroke-dasharray="4 4"/>
+    <path d="M110 90 L605 90" class="arrow"/>
+    <text x="360" y="82" text-anchor="middle" class="mono">GET /api/notes</text>
+    <path d="M610 130 L115 130" class="arrow"/>
+    <text x="360" y="122" text-anchor="middle" class="mono">200 OK · ETag: "a1b2c3" · Cache-Control: no-cache</text>
+    <text x="360" y="148" text-anchor="middle" class="small">тіло 40 КБ — браузер зберігає у кеш разом з ETag</text>
+    <path d="M110 195 L605 195" class="arrow"/>
+    <text x="360" y="187" text-anchor="middle" class="mono">GET /api/notes · If-None-Match: "a1b2c3"</text>
+    <rect x="620" y="205" width="90" height="34" rx="6" class="accent"/>
+    <text x="665" y="227" text-anchor="middle" class="small">хеш той самий?</text>
+    <path d="M610 255 L115 255" class="arrow"/>
+    <text x="360" y="247" text-anchor="middle" class="mono">304 Not Modified · без тіла (0 КБ)</text>
+    <text x="360" y="275" text-anchor="middle" class="small">браузер бере 40 КБ зі свого кешу — заощадили трафік і час</text>
+    <text x="360" y="305" text-anchor="middle" class="muted">Якщо дані змінилися → 200 OK з новим тілом і новим ETag</text>
+  </svg>
+  <figcaption>Умовний запит: замість повторної передачі тіла сервер лише підтверджує, що копія у браузера актуальна.</figcaption>
+</figure>
+
+<pre><code class="language-ts">// Express: ETag для JSON-відповіді вручну (Express має вбудований etag для res.send,
+// але явний код показує механізм)
+import { createHash } from "node:crypto";
+
+app.get("/api/notes", async (req, res) =&gt; {
+  const notes = await listNotes();
+  const body = JSON.stringify(notes);
+  // Слабкий ETag (W/) — «семантично той самий», достатньо для API
+  const etag = `W/"${createHash("sha1").update(body).digest("base64url")}"`;
+
+  res.set("ETag", etag);
+  res.set("Cache-Control", "private, no-cache");   // кешувати, але завжди перевіряти
+
+  // Браузер надіслав хеш своєї копії — і він збігається
+  if (req.get("If-None-Match") === etag) {
+    return res.status(304).end();                  // без тіла
+  }
+  res.type("json").send(body);
+});</code></pre>
+
+<p><code>Last-Modified</code> / <code>If-Modified-Since</code> — старіший механізм на основі дати з точністю до секунди. ETag точніший і працює для згенерованого контенту, де «дати зміни» немає.</p>
+
+<h3>Immutable і хеш у назві файлу</h3>
+<p>Найкраща стратегія для статики (JS, CSS, шрифти, зображення): бандлер додає хеш вмісту до імені файлу (<code>app.3f9a2c1d.js</code>), а сервер віддає його з <code>Cache-Control: public, max-age=31536000, immutable</code> (рік). Файл кешується назавжди — і це безпечно, бо коли вміст зміниться, зміниться і хеш, і HTML посилатиметься на новий URL. Сам HTML при цьому — <code>no-cache</code>, щоб завжди підхоплювати нові імена файлів. Vite, Next.js і Webpack роблять хешування за замовчуванням.</p>
+
+<pre><code class="language-ts">// Express: різні правила для різних типів
+import express from "express";
+
+app.use("/assets", express.static("dist/assets", {
+  immutable: true,
+  maxAge: "1y",           // Cache-Control: public, max-age=31536000, immutable
+}));
+
+app.get("*", (req, res) =&gt; {
+  res.set("Cache-Control", "no-cache");           // HTML завжди перевіряється
+  res.sendFile("dist/index.html", { root: "." });
+});</code></pre>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><strong>Vary.</strong> Якщо відповідь залежить від заголовка запиту (мова через <code>Accept-Language</code>, стиснення через <code>Accept-Encoding</code>), потрібно вказати <code>Vary: Accept-Language</code> — інакше CDN віддасть українську версію англомовному користувачу.</li>
+    <li><strong>Персональні дані з <code>public</code>.</strong> Відповідь «мої нотатки» з <code>public, max-age=60</code> потрапляє у CDN — і наступний користувач бачить чужі нотатки. Для всього, що залежить від cookie/токена, — <code>private</code> або <code>no-store</code>.</li>
+    <li><strong>Довгий max-age без хешу в імені.</strong> <code>style.css</code> з <code>max-age=86400</code> — і після деплою користувачі добу бачать старі стилі. Або хеш в імені, або короткий max-age.</li>
+    <li><strong>Дефолти Express.</strong> <code>res.json()</code> сам ставить ETag, але не <code>Cache-Control</code>; без нього браузери застосовують евристичний кеш, і поведінка непередбачувана. Завжди задавайте явно.</li>
+  </ul>
+</div>
+
+<h2 id="s4">4. CDN: кеш на краю мережі</h2>
+<p>Мережа доставки контенту (Content Delivery Network, CDN) — це сотні серверів («edge-нод», точок присутності, PoP) по всьому світу. Користувач з Києва йде на найближчу ноду у Варшаві або Франкфурті, а не на ваш сервер у Вірджинії. Якщо нода має свіжу копію — відповідає за 10–20 мс. Якщо ні — йде до вашого «оріджину» (origin), зберігає відповідь і віддає її наступним.</p>
+
+<figure>
+  <svg viewBox="0 0 720 300" role="img" aria-label="Як працює CDN: користувачі звертаються до найближчих edge-нод, промахи йдуть до origin">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="40" width="100" height="44" rx="10" class="blue"/>
+    <text x="70" y="67" text-anchor="middle" class="small">Київ</text>
+    <rect x="20" y="130" width="100" height="44" rx="10" class="blue"/>
+    <text x="70" y="157" text-anchor="middle" class="small">Львів</text>
+    <rect x="20" y="220" width="100" height="44" rx="10" class="blue"/>
+    <text x="70" y="247" text-anchor="middle" class="small">Токіо</text>
+    <path d="M120 62 L220 100" class="arrow"/>
+    <path d="M120 152 L220 120" class="arrow"/>
+    <text x="165" y="95" text-anchor="middle" class="mono">15 мс</text>
+    <rect x="220" y="80" width="140" height="60" rx="12" class="purple"/>
+    <text x="290" y="104" text-anchor="middle" class="bold">Edge · Варшава</text>
+    <text x="290" y="124" text-anchor="middle" class="small">HIT: віддає з кешу</text>
+    <path d="M120 242 L220 242" class="arrow"/>
+    <text x="165" y="232" text-anchor="middle" class="mono">8 мс</text>
+    <rect x="220" y="212" width="140" height="60" rx="12" class="purple"/>
+    <text x="290" y="236" text-anchor="middle" class="bold">Edge · Токіо</text>
+    <text x="290" y="256" text-anchor="middle" class="small">MISS: йде до origin</text>
+    <path d="M360 242 L520 160" class="arrow dashed"/>
+    <text x="450" y="215" text-anchor="middle" class="mono">180 мс, один раз</text>
+    <path d="M360 110 L520 140" class="arrow dashed" style="opacity:.4"/>
+    <text x="440" y="112" text-anchor="middle" class="muted">лише при промаху</text>
+    <rect x="520" y="120" width="180" height="60" rx="12" class="green"/>
+    <text x="610" y="144" text-anchor="middle" class="bold">Origin</text>
+    <text x="610" y="164" text-anchor="middle" class="small">ваш сервер, Франкфурт</text>
+    <text x="360" y="30" text-anchor="middle" class="muted">Заголовок відповіді CF-Cache-Status / X-Cache: HIT або MISS показує, що сталося</text>
+  </svg>
+  <figcaption>CDN «наближає» контент до користувача. Origin бачить лише перший запит на кожну ноду — решту обслуговує edge.</figcaption>
+</figure>
+
+<p><strong>Що кешувати у CDN:</strong> усю статику (з <code>immutable</code>), зображення, публічні сторінки і API-відповіді, які однакові для всіх (список товарів, стаття блогу) — з <code>s-maxage</code> і <code>stale-while-revalidate</code>. <strong>Що не кешувати:</strong> персоналізовані відповіді, POST/PUT, усе з <code>Set-Cookie</code>.</p>
+<p><strong>Purge (очищення)</strong> — коли треба оновити кеш до закінчення TTL: після публікації статті ви викликаєте API CDN «забудь <code>/blog/my-post</code>» (або за тегом: Cloudflare Cache-Tag, Fastly Surrogate-Key). Це подієва інвалідація, про яку буде далі. Сучасні CDN (Cloudflare, Fastly, Vercel Edge, AWS CloudFront) також виконують код на edge — маршрутизацію, A/B-тести, автентифікацію — але це вже поза кешуванням.</p>
+
+<h2 id="s5">5. Серверний кеш: патерни і Redis</h2>
+<p>Коли HTTP-кеш не підходить (дані персональні, змінюються часто, або потрібен кеш між запитом до бази і відповіддю), кешують на сервері. Є чотири класичні патерни, які відрізняються тим, хто і коли пише в кеш.</p>
+
+<figure>
+  <svg viewBox="0 0 720 380" role="img" aria-label="Чотири патерни серверного кешування: cache-aside, read-through, write-through, write-behind">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="180" y="24" text-anchor="middle" class="bold">Cache-aside (lazy)</text>
+    <rect x="20" y="40" width="80" height="40" rx="8" class="green"/><text x="60" y="65" text-anchor="middle" class="small">App</text>
+    <rect x="140" y="40" width="80" height="40" rx="8" class="red"/><text x="180" y="65" text-anchor="middle" class="small">Кеш</text>
+    <rect x="260" y="40" width="80" height="40" rx="8" class="box-fill"/><text x="300" y="65" text-anchor="middle" class="small">БД</text>
+    <path d="M100 52 L140 52" class="arrow"/><text x="120" y="46" text-anchor="middle" class="mono">1 get</text>
+    <path d="M140 70 L100 70" class="arrow dashed"/><text x="120" y="92" text-anchor="middle" class="mono">miss</text>
+    <path d="M60 80 Q160 130 260 80" class="arrow"/><text x="180" y="122" text-anchor="middle" class="mono">2 select</text>
+    <path d="M100 100 L140 100" class="arrow" transform="translate(0,20)"/><text x="120" y="112" text-anchor="middle" class="mono">3 set</text>
+    <text x="180" y="150" text-anchor="middle" class="muted">app сам керує кешем; найпоширеніший</text>
+
+    <text x="540" y="24" text-anchor="middle" class="bold">Read-through</text>
+    <rect x="380" y="40" width="80" height="40" rx="8" class="green"/><text x="420" y="65" text-anchor="middle" class="small">App</text>
+    <rect x="500" y="40" width="80" height="40" rx="8" class="red"/><text x="540" y="65" text-anchor="middle" class="small">Кеш</text>
+    <rect x="620" y="40" width="80" height="40" rx="8" class="box-fill"/><text x="660" y="65" text-anchor="middle" class="small">БД</text>
+    <path d="M460 60 L500 60" class="arrow"/><text x="480" y="52" text-anchor="middle" class="mono">get</text>
+    <path d="M580 60 L620 60" class="arrow dashed"/><text x="600" y="52" text-anchor="middle" class="mono">miss→</text>
+    <text x="540" y="110" text-anchor="middle" class="muted">кеш сам ходить у БД при промаху;</text>
+    <text x="540" y="128" text-anchor="middle" class="muted">app бачить лише кеш (бібліотека/проксі)</text>
+
+    <text x="180" y="210" text-anchor="middle" class="bold">Write-through</text>
+    <rect x="20" y="226" width="80" height="40" rx="8" class="green"/><text x="60" y="251" text-anchor="middle" class="small">App</text>
+    <rect x="140" y="226" width="80" height="40" rx="8" class="red"/><text x="180" y="251" text-anchor="middle" class="small">Кеш</text>
+    <rect x="260" y="226" width="80" height="40" rx="8" class="box-fill"/><text x="300" y="251" text-anchor="middle" class="small">БД</text>
+    <path d="M100 246 L140 246" class="arrow"/><text x="120" y="238" text-anchor="middle" class="mono">write</text>
+    <path d="M220 246 L260 246" class="arrow"/><text x="240" y="238" text-anchor="middle" class="mono">sync</text>
+    <text x="180" y="296" text-anchor="middle" class="muted">запис іде через кеш у БД синхронно;</text>
+    <text x="180" y="314" text-anchor="middle" class="muted">кеш завжди свіжий, запис повільніший</text>
+
+    <text x="540" y="210" text-anchor="middle" class="bold">Write-behind (write-back)</text>
+    <rect x="380" y="226" width="80" height="40" rx="8" class="green"/><text x="420" y="251" text-anchor="middle" class="small">App</text>
+    <rect x="500" y="226" width="80" height="40" rx="8" class="red"/><text x="540" y="251" text-anchor="middle" class="small">Кеш</text>
+    <rect x="620" y="226" width="80" height="40" rx="8" class="box-fill"/><text x="660" y="251" text-anchor="middle" class="small">БД</text>
+    <path d="M460 246 L500 246" class="arrow"/><text x="480" y="238" text-anchor="middle" class="mono">write</text>
+    <path d="M580 246 L620 246" class="arrow dashed"/><text x="600" y="238" text-anchor="middle" class="mono">пізніше</text>
+    <text x="540" y="296" text-anchor="middle" class="muted">запис у кеш миттєвий, у БД — пачками у фоні;</text>
+    <text x="540" y="314" text-anchor="middle" class="muted">найшвидший запис, ризик втрати при падінні кешу</text>
+    <text x="360" y="360" text-anchor="middle" class="small">Синім-зеленим — застосунок, червоним — кеш (Redis), білим — база даних</text>
+  </svg>
+  <figcaption>Патерни відрізняються тим, чи знає застосунок про кеш і чи проходять записи крізь нього.</figcaption>
+</figure>
+
+<ul>
+  <li><strong>Cache-aside (lazy loading)</strong> — застосунок спершу дивиться в кеш; при промаху читає з бази і кладе в кеш. Кешується лише те, що справді запитували. Найпоширеніший патерн для Redis.</li>
+  <li><strong>Read-through</strong> — те саме, але логіка «при промаху сходи в базу» захована у бібліотеці кешу. Код застосунку простіший.</li>
+  <li><strong>Write-through</strong> — кожен запис іде і в кеш, і в базу синхронно. Кеш ніколи не застарілий, але записи повільніші, і кешується все підряд, навіть те, що ніхто не читає.</li>
+  <li><strong>Write-behind</strong> — запис у кеш, а в базу — асинхронно пачками. Дуже швидко, але якщо кеш впаде до синхронізації — дані втрачено. Для лічильників переглядів годиться, для платежів — ні.</li>
+</ul>
+
+<pre><code class="language-ts">// src/cache.ts — cache-aside на Redis з ioredis
+import Redis from "ioredis";
+import { config } from "./config.js";
+
+export const redis = new Redis(config.REDIS_URL);
+
+/**
+ * Читає значення з кешу; при промаху викликає loader, зберігає результат з TTL.
+ * @param key   ключ у Redis, напр. "notes:user:42"
+ * @param ttlSec час життя в секундах
+ * @param loader функція, що дістає дані з джерела істини
+ */
+export async function cached&lt;T&gt;(key: string, ttlSec: number, loader: () =&gt; Promise&lt;T&gt;): Promise&lt;T&gt; {
+  const hit = await redis.get(key);
+  if (hit !== null) {
+    return JSON.parse(hit) as T;               // HIT — база не задіяна
+  }
+
+  const value = await loader();                // MISS — йдемо в базу
+  // Кладемо в кеш. Джитер ±10 % до TTL — щоб ключі не протухали всі одночасно
+  const jitter = Math.floor(ttlSec * (0.9 + Math.random() * 0.2));
+  await redis.set(key, JSON.stringify(value), "EX", jitter);
+  return value;
+}
+
+// src/notes/service.ts — використання
+export async function listNotesForUser(userId: number) {
+  return cached(`notes:user:${userId}`, 60, () =&gt;
+    db.select().from(notes).where(eq(notes.userId, userId)).orderBy(desc(notes.createdAt)),
+  );
+}
+
+export async function createNote(userId: number, data: NewNote) {
+  const [note] = await db.insert(notes).values({ ...data, userId }).returning();
+  // Подієва інвалідація: після запису прибираємо застарілий список
+  await redis.del(`notes:user:${userId}`);
+  return note;
+}</code></pre>
+
+<p>Кілька правил гарного ключа: простір імен через двокрапку (<code>notes:user:42</code>), версія схеми у ключі, якщо формат даних змінюється (<code>v2:notes:user:42</code>) — тоді після деплою старий кеш просто ігнорується, і жоден null не зламає парсинг. І завжди TTL: ключ без TTL — витік пам'яті в Redis.</p>
+
+<div class="box why">
+  <div name="title" class="title">Пам'ять процесу чи Redis?</div>
+  <p>Кеш у пам'яті Node (<code>Map</code>, <code>lru-cache</code>) — найшвидший (наносекунди) і не потребує мережі. Але він локальний для одного процесу: при двох репліках у кожної свій кеш, і після інвалідації в одній друга віддає старе. Redis — спільний для всіх реплік, переживає перезапуск застосунку, дає атомарні операції і TTL. Типовий вибір: Redis для всього спільного; пам'ять — для дрібних незмінних довідників (список країн, конфіг) або як перший рівень перед Redis.</p>
+</div>
+
+<h2 id="s6">6. Інвалідація і cache stampede</h2>
+<p>Жарт Філа Карлтона, який Мартін Фаулер зробив відомим: «У комп'ютерних науках є лише дві складні проблеми: інвалідація кешу і найменування речей». Покласти в кеш легко. Складно — дізнатися, коли копія стала неправдивою.</p>
+
+<h3>TTL проти подієвої інвалідації</h3>
+<p><strong>TTL (time-to-live)</strong> — просто: кеш живе N секунд і вмирає. Плюс — нічого не треба відстежувати, застарілість обмежена N. Мінус — протягом N секунд користувач може бачити старе, і навпаки, при рідких змінах ви даремно перечитуєте базу щоN секунд.</p>
+<p><strong>Подієва (event-driven)</strong> — при кожній зміні даних код явно видаляє або оновлює відповідні ключі (як <code>redis.del</code> у прикладі вище). Плюс — свіжість одразу. Мінус — треба знати всі ключі, що залежать від запису (нотатка входить у список користувача, у пошук, у стрічку тегів...), і не пропустити жодного шляху зміни (міграція, адмінка, фоновий воркер).</p>
+<p>На практиці поєднують: подієва інвалідація для головних шляхів плюс TTL як страховка на випадок, якщо якийсь шлях пропустили. Для складних залежностей використовують <strong>теги</strong>: кожен ключ позначають тегами (<code>user:42</code>, <code>note:7</code>), а інвалідація йде за тегом — так працюють Next.js <code>revalidateTag</code> і Cloudflare Cache-Tag.</p>
+
+<h3>Cache stampede (thundering herd)</h3>
+<p>Сценарій: популярний ключ протух. У цю ж мілісекунду 500 запитів одночасно бачать промах і всі 500 біжать у базу з одним і тим самим важким запитом. База захлинається, латентність злітає, деякі запити падають за таймаутом — і кеш так і не заповнюється. Це «тиснява біля каси» (stampede) або «гуркіт стада» (thundering herd).</p>
+
+<figure>
+  <svg viewBox="0 0 720 320" role="img" aria-label="Cache stampede і його рішення: lock, early refresh, jitter">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="170" y="24" text-anchor="middle" class="bold">Проблема</text>
+    <rect x="20" y="40" width="60" height="30" rx="6" class="blue"/><text x="50" y="60" text-anchor="middle" class="small">req 1</text>
+    <rect x="20" y="78" width="60" height="30" rx="6" class="blue"/><text x="50" y="98" text-anchor="middle" class="small">req 2</text>
+    <rect x="20" y="116" width="60" height="30" rx="6" class="blue"/><text x="50" y="136" text-anchor="middle" class="small">… 500</text>
+    <rect x="130" y="70" width="80" height="50" rx="8" class="red"/>
+    <text x="170" y="92" text-anchor="middle" class="small">Кеш</text>
+    <text x="170" y="108" text-anchor="middle" class="mono">MISS ×500</text>
+    <path d="M80 55 L130 85" class="arrow"/><path d="M80 93 L130 95" class="arrow"/><path d="M80 131 L130 105" class="arrow"/>
+    <path d="M210 80 L270 60" class="arrow"/><path d="M210 95 L270 95" class="arrow"/><path d="M210 110 L270 130" class="arrow"/>
+    <rect x="270" y="50" width="70" height="90" rx="8" class="box-fill"/>
+    <text x="305" y="90" text-anchor="middle" class="small">БД</text>
+    <text x="305" y="108" text-anchor="middle" class="small">×500</text>
+    <text x="305" y="126" text-anchor="middle" class="mono">💥</text>
+    <text x="170" y="170" text-anchor="middle" class="muted">усі промахнулись одночасно</text>
+
+    <text x="540" y="24" text-anchor="middle" class="bold">Рішення 1: lock (single flight)</text>
+    <rect x="390" y="40" width="60" height="30" rx="6" class="blue"/><text x="420" y="60" text-anchor="middle" class="small">req 1</text>
+    <rect x="390" y="78" width="60" height="30" rx="6" class="blue"/><text x="420" y="98" text-anchor="middle" class="small">req 2…</text>
+    <rect x="500" y="50" width="80" height="60" rx="8" class="red"/>
+    <text x="540" y="72" text-anchor="middle" class="small">Кеш</text>
+    <text x="540" y="90" text-anchor="middle" class="mono">SET NX lock</text>
+    <path d="M450 55 L500 70" class="arrow"/>
+    <path d="M450 93 L500 90" class="arrow dashed"/>
+    <path d="M580 80 L640 80" class="arrow"/>
+    <text x="610" y="72" text-anchor="middle" class="mono">×1</text>
+    <rect x="640" y="55" width="60" height="50" rx="8" class="box-fill"/><text x="670" y="85" text-anchor="middle" class="small">БД</text>
+    <text x="540" y="140" text-anchor="middle" class="muted">лише перший іде у БД; інші чекають</text>
+    <text x="540" y="158" text-anchor="middle" class="muted">або отримують stale-копію</text>
+
+    <text x="170" y="210" text-anchor="middle" class="bold">Рішення 2: early refresh</text>
+    <rect x="20" y="225" width="300" height="24" rx="6" class="green"/>
+    <rect x="240" y="225" width="80" height="24" rx="6" class="accent"/>
+    <text x="130" y="242" text-anchor="middle" class="small">TTL 60 с: свіжий</text>
+    <text x="280" y="242" text-anchor="middle" class="small">оновити зараз</text>
+    <path d="M280 255 L280 275" class="arrow"/>
+    <text x="170" y="290" text-anchor="middle" class="muted">за 10 с до кінця TTL один запит оновлює у фоні,</text>
+    <text x="170" y="308" text-anchor="middle" class="muted">решта досі отримують ще свіжу копію</text>
+
+    <text x="540" y="210" text-anchor="middle" class="bold">Рішення 3: jitter</text>
+    <rect x="400" y="225" width="120" height="16" rx="4" class="green"/><text x="620" y="237" text-anchor="start" class="mono">TTL 54 с</text>
+    <rect x="400" y="246" width="140" height="16" rx="4" class="green"/><text x="620" y="258" text-anchor="start" class="mono">TTL 63 с</text>
+    <rect x="400" y="267" width="128" height="16" rx="4" class="green"/><text x="620" y="279" text-anchor="start" class="mono">TTL 58 с</text>
+    <text x="540" y="308" text-anchor="middle" class="muted">випадковий ±10 % — ключі протухають не разом</text>
+  </svg>
+  <figcaption>Stampede: сотні промахів на один ключ водночас. Ліки: замок на перерахунок, оновлення заздалегідь, розмазування TTL.</figcaption>
+</figure>
+
+<pre><code class="language-ts">// cache-aside з замком проти stampede
+export async function cachedWithLock&lt;T&gt;(key: string, ttlSec: number, loader: () =&gt; Promise&lt;T&gt;): Promise&lt;T&gt; {
+  const hit = await redis.get(key);
+  if (hit !== null) return JSON.parse(hit) as T;
+
+  const lockKey = `${key}:lock`;
+  // SET NX EX — атомарно: встановити, лише якщо ключа немає, з таймаутом 10 с
+  const gotLock = await redis.set(lockKey, "1", "EX", 10, "NX");
+
+  if (gotLock) {
+    try {
+      const value = await loader();
+      await redis.set(key, JSON.stringify(value), "EX", ttlSec);
+      return value;
+    } finally {
+      await redis.del(lockKey);
+    }
+  }
+
+  // Замок у когось іншого: трохи чекаємо і пробуємо кеш знову
+  for (let i = 0; i &lt; 20; i++) {
+    await new Promise((r) =&gt; setTimeout(r, 50));
+    const retry = await redis.get(key);
+    if (retry !== null) return JSON.parse(retry) as T;
+  }
+  return loader();   // так і не дочекалися — йдемо в базу самі (краще, ніж помилка)
+}</code></pre>
+
+<p>У межах одного процесу Node простіший варіант — тримати <code>Map&lt;key, Promise&gt;</code> запитів «у польоті» і повертати той самий проміс усім, хто спитав про той самий ключ (патерн single-flight, або dedupe). Це те, що робить TanStack Query на фронтенді і <code>React.cache</code> у Server Components.</p>
+
+<h2 id="s7">7. Кеш на рівні бази даних</h2>
+<p>Postgres кешує сам: <code>shared_buffers</code> (зазвичай 25 % RAM) тримає гарячі сторінки таблиць та індексів, а ОС додає свій page cache. Тому «повторний запит швидший» — це не магія, а сторінки в пам'яті. <code>EXPLAIN (ANALYZE, BUFFERS)</code> показує <code>shared hit</code> проти <code>read</code> — скільки сторінок узято з кешу, а скільки з диска.</p>
+<p>Але Postgres <em>не</em> кешує результати запитів (на відміну від старого MySQL query cache). Два однакових <code>SELECT</code> виконуються двічі — швидко, бо дані в пам'яті, але з повним плануванням і виконанням. Для важких агрегацій (звіт за місяць, топ-100, статистика) є <strong>матеріалізовані в'юшки (materialized views)</strong> — збережений результат запиту, який оновлюють за розкладом:</p>
+
+<pre><code class="language-sql">-- Важкий запит: статистика нотаток по користувачах
+CREATE MATERIALIZED VIEW user_note_stats AS
+SELECT user_id,
+       count(*)                          AS total,
+       count(*) FILTER (WHERE archived)  AS archived,
+       max(created_at)                   AS last_note_at
+FROM notes
+GROUP BY user_id;
+
+-- Індекс на матеріалізованій в'юшці — можна, як на таблиці
+CREATE UNIQUE INDEX ON user_note_stats (user_id);
+
+-- Оновлення (за cron або після пачки записів).
+-- CONCURRENTLY не блокує читання, але потребує унікального індексу
+REFRESH MATERIALIZED VIEW CONCURRENTLY user_note_stats;
+
+-- Читання — миттєве, це просто таблиця
+SELECT * FROM user_note_stats WHERE user_id = 42;</code></pre>
+
+<p>Матеріалізована в'юшка — це кеш всередині бази з тими самими компромісами: застаріває до наступного <code>REFRESH</code>, займає місце, потребує стратегії оновлення. Але вона транзакційно узгоджена з рештою бази, і для аналітичних панелей це часто найпростіше рішення. Також існує підготовлене планування: <code>PREPARE</code>/prepared statements кешують план запиту (не результат) — ORM і драйвери (<code>pg</code>, Drizzle) роблять це автоматично для повторюваних запитів.</p>
+
+<h2 id="s8">8. Кеш на фронтенді: TanStack Query і Next.js</h2>
+<p>На клієнті кеш вирішує іншу проблему: не «розвантажити базу», а «не показувати спінер, коли дані вже є». TanStack Query (колишній React Query) — стандарт де-факто для серверного стану в React. Кожен запит має ключ, кешується в пам'яті, і бібліотека керує свіжістю за принципом stale-while-revalidate: показує те, що є, і оновлює у фоні.</p>
+
+<pre><code class="language-tsx">// features/notes/api.ts
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+export function useNotes() {
+  return useQuery({
+    queryKey: ["notes"],                        // ключ кешу — як у Redis
+    queryFn: () =&gt; fetch("/api/notes").then((r) =&gt; r.json()),
+    staleTime: 30_000,        // 30 с вважати свіжими: повторний монтаж не робить запит
+    gcTime: 5 * 60_000,       // 5 хв тримати в пам'яті після того, як ніхто не використовує
+    // За замовчуванням: refetch при фокусі вікна і відновленні мережі
+  });
+}
+
+export function useCreateNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { title: string }) =&gt;
+      fetch("/api/notes", { method: "POST", body: JSON.stringify(data),
+        headers: { "Content-Type": "application/json" } }).then((r) =&gt; r.json()),
+    // Подієва інвалідація на клієнті: позначити ["notes"] застарілим → refetch
+    onSuccess: () =&gt; qc.invalidateQueries({ queryKey: ["notes"] }),
+  });
+}</code></pre>
+
+<p>Зверніть увагу на паралель з Redis: ключ, TTL (<code>staleTime</code>), інвалідація після мутації. Ті самі ідеї — інший шар. Плюс дедуплікація: десять компонентів з <code>useNotes()</code> роблять один мережевий запит.</p>
+
+<p>У Next.js App Router кешування вбудоване в <code>fetch</code> на сервері та в маршрутизатор. Механізм змінювався між версіями (перевіряйте документацію вашої версії у <code>node_modules/next/dist/docs/</code>), але концепції стабільні: <strong>Data Cache</strong> — результат <code>fetch</code> на сервері з <code>next: { revalidate: 60 }</code> (TTL) або <code>next: { tags: ["notes"] }</code> плюс <code>revalidateTag("notes")</code> у Server Action (подієва інвалідація); <strong>Full Route Cache</strong> — статично відрендерені сторінки; <strong>Router Cache</strong> — кеш переходів у браузері. Ще раз ті самі два підходи: час або подія.</p>
+
+<pre><code class="language-ts">// app/notes/page.tsx (Server Component)
+export default async function NotesPage() {
+  const res = await fetch("https://api.example.com/notes", {
+    next: { revalidate: 60, tags: ["notes"] },   // TTL 60 с + тег для подієвої інвалідації
+  });
+  const notes = await res.json();
+  return &lt;NotesList notes={notes} /&gt;;
+}
+
+// app/notes/actions.ts
+"use server";
+import { revalidateTag } from "next/cache";
+
+export async function createNote(formData: FormData) {
+  await fetch("https://api.example.com/notes", { method: "POST", body: formData });
+  revalidateTag("notes");   // усі fetch з цим тегом перечитаються при наступному запиті
+}</code></pre>
+
+<h2 id="s9">9. Вимірювання: перцентилі, профілювання, EXPLAIN, N+1</h2>
+<p>Оптимізувати без вимірювання — це вгадувати. А вимірювати неправильно — гірше, ніж не вимірювати, бо дає хибну впевненість.</p>
+
+<h3>Чому не середнє: p50, p95, p99</h3>
+<p>Уявіть 100 запитів: 99 виконались за 10 мс, один — за 5000 мс. Середнє — 60 мс. «Непогано». Але один зі ста користувачів чекав 5 секунд. А якщо сторінка робить 10 API-запитів, шанс, що хоча б один потрапить у «повільний хвіст», — близько 10 %. Середнє ховає хвіст, а користувачі живуть саме в хвості.</p>
+<p>Тому латентність описують перцентилями: <strong>p50</strong> (медіана) — половина запитів швидша за це; <strong>p95</strong> — 95 % швидші, 5 % повільніші; <strong>p99</strong> — лише 1 % повільніший. SLO (цільовий рівень сервісу) формулюють як «p99 латентності GET /api/notes &lt; 300 мс». Брендан Грегг наголошує: дивіться на розподіл (гістограму), а не на одне число — бімодальний розподіл (половина 5 мс, половина 500 мс — кеш хіт/міс) середнім і навіть медіаною не побачити.</p>
+
+<pre><code class="language-bash"># autocannon — навантажувальний тест з перцентилями з коробки
+npx autocannon -c 50 -d 20 http://localhost:3000/api/notes
+# Latency: p50 12 ms · p97.5 48 ms · p99 210 ms · max 1.2 s
+# Requests/sec (throughput): 3 800
+# Якщо p99 у 20 разів більший за p50 — шукайте, що іноді відбувається: GC, промах кешу, lock у БД</code></pre>
+
+<p><strong>Пропускна здатність (throughput)</strong> — запитів за секунду, які система витримує без деградації латентності. Латентність і throughput пов'язані: при наближенні до межі латентність зростає експоненційно (черги). Тестуйте під навантаженням, близьким до реального, а не одним curl.</p>
+
+<h3>Профілювання Node</h3>
+<pre><code class="language-bash"># Вбудований CPU-профайлер: пише .cpuprofile при виході з процесу
+node --cpu-prof --cpu-prof-dir=./profiles dist/server.js
+# Потім: Chrome DevTools → Performance → Load profile → flame graph:
+# широкі «плато» = функції, де процес проводить час
+
+# Профіль пам'яті (пошук витоків)
+node --heap-prof dist/server.js
+
+# Clinic.js — три інструменти в одному: doctor (діагноз), flame (CPU), bubbleprof (async)
+npx clinic doctor --on-port 'autocannon -c 50 -d 10 localhost:3000/api/notes' -- node dist/server.js
+
+# Подія event loop заблокований довше N мс — головний ворог Node
+node --trace-event-categories v8,node.perf dist/server.js</code></pre>
+
+<p>Що шукати у Node: синхронні операції в гарячому шляху (<code>JSON.parse</code> великих тіл, <code>fs.readFileSync</code>, важкі регулярки, синхронний bcrypt), блокування event loop (одна довга обчислювальна функція зупиняє <em>всі</em> запити), надмірні алокації (GC-паузи видно як періодичні сплески p99).</p>
+
+<h3>EXPLAIN ANALYZE</h3>
+<pre><code class="language-sql">EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM notes WHERE user_id = 42 ORDER BY created_at DESC LIMIT 20;
+
+-- ПОГАНО: Seq Scan on notes (cost=0.00..4 512.00 rows=20) (actual time=0.02..38.5 rows=20)
+--         Buffers: shared hit=2 100    ← перечитали 2100 сторінок (16 МБ) заради 20 рядків
+-- Виправлення: складений індекс під фільтр + сортування
+CREATE INDEX notes_user_created_idx ON notes (user_id, created_at DESC);
+
+-- ДОБРЕ: Index Scan using notes_user_created_idx (actual time=0.03..0.09 rows=20)
+--        Buffers: shared hit=4        ← 4 сторінки</code></pre>
+<p>Ключові рядки у виводі: <code>Seq Scan</code> на великій таблиці — майже завжди відсутній індекс; <code>rows=</code> estimated проти actual — велика різниця означає застарілу статистику (<code>ANALYZE notes</code>); <code>Buffers: read</code> — читання з диска, тобто дані не в кеші; <code>Sort Method: external merge</code> — сортування не влізло у <code>work_mem</code>. Сайт use-the-index-luke.com пояснює індекси глибше, ніж будь-яка документація ORM.</p>
+
+<h3>N+1</h3>
+<p>Найпоширеніша проблема продуктивності в коді з ORM: один запит за списком, а потім по одному запиту на кожен елемент.</p>
+
+<figure>
+  <svg viewBox="0 0 720 300" role="img" aria-label="Проблема N+1 запитів і її рішення через JOIN або IN">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="180" y="24" text-anchor="middle" class="bold">N+1: 1 + 100 запитів</text>
+    <rect x="20" y="40" width="90" height="230" rx="10" class="green"/>
+    <text x="65" y="155" text-anchor="middle" class="small" transform="rotate(-90 65 155)">App (цикл по нотатках)</text>
+    <rect x="250" y="40" width="90" height="230" rx="10" class="box-fill"/>
+    <text x="295" y="155" text-anchor="middle" class="small" transform="rotate(-90 295 155)">Postgres</text>
+    <path d="M110 60 L250 60" class="arrow"/><text x="180" y="54" text-anchor="middle" class="mono">SELECT * FROM notes</text>
+    <path d="M110 100 L250 100" class="arrow"/><text x="180" y="94" text-anchor="middle" class="mono">SELECT author WHERE id=1</text>
+    <path d="M110 130 L250 130" class="arrow"/><text x="180" y="124" text-anchor="middle" class="mono">SELECT author WHERE id=2</text>
+    <path d="M110 160 L250 160" class="arrow"/><text x="180" y="154" text-anchor="middle" class="mono">SELECT author WHERE id=3</text>
+    <text x="180" y="190" text-anchor="middle" class="mono">…</text>
+    <path d="M110 220 L250 220" class="arrow"/><text x="180" y="214" text-anchor="middle" class="mono">SELECT author WHERE id=100</text>
+    <text x="180" y="256" text-anchor="middle" class="muted">100 × ~1 мс мережі = 100+ мс</text>
+
+    <text x="540" y="24" text-anchor="middle" class="bold">Рішення: 1 або 2 запити</text>
+    <rect x="390" y="40" width="90" height="230" rx="10" class="green"/>
+    <text x="435" y="155" text-anchor="middle" class="small" transform="rotate(-90 435 155)">App</text>
+    <rect x="610" y="40" width="90" height="230" rx="10" class="box-fill"/>
+    <text x="655" y="155" text-anchor="middle" class="small" transform="rotate(-90 655 155)">Postgres</text>
+    <path d="M480 80 L610 80" class="arrow"/>
+    <text x="545" y="72" text-anchor="middle" class="mono">SELECT … FROM notes</text>
+    <text x="545" y="100" text-anchor="middle" class="mono">JOIN users ON …</text>
+    <text x="545" y="140" text-anchor="middle" class="muted">або</text>
+    <path d="M480 170 L610 170" class="arrow"/>
+    <text x="545" y="162" text-anchor="middle" class="mono">SELECT * FROM notes</text>
+    <path d="M480 210 L610 210" class="arrow"/>
+    <text x="545" y="202" text-anchor="middle" class="mono">SELECT * FROM users</text>
+    <text x="545" y="228" text-anchor="middle" class="mono">WHERE id IN (1,2,…,100)</text>
+    <text x="545" y="256" text-anchor="middle" class="muted">~2–3 мс разом</text>
+  </svg>
+  <figcaption>N+1: цикл з запитом усередині. Ліки — JOIN, або один запит з <code>IN</code> для всіх id (batching, як робить DataLoader).</figcaption>
+</figure>
+
+<pre><code class="language-ts">// ПОГАНО: N+1 — виглядає невинно
+const notes = await db.select().from(notesTable);
+for (const note of notes) {
+  note.author = await db.select().from(users).where(eq(users.id, note.userId));  // ×N
+}
+
+// ДОБРЕ 1: JOIN — один запит
+const rows = await db
+  .select({ note: notesTable, author: users })
+  .from(notesTable)
+  .innerJoin(users, eq(users.id, notesTable.userId));
+
+// ДОБРЕ 2: batching — два запити, зручно коли JOIN незручний (GraphQL, різні джерела)
+const notes = await db.select().from(notesTable);
+const ids = [...new Set(notes.map((n) =&gt; n.userId))];
+const authors = await db.select().from(users).where(inArray(users.id, ids));
+const byId = new Map(authors.map((u) =&gt; [u.id, u]));
+const result = notes.map((n) =&gt; ({ ...n, author: byId.get(n.userId) }));
+
+// Drizzle relational queries роблять batching самі:
+// db.query.notes.findMany({ with: { author: true } })</code></pre>
+<p>Як помітити N+1: увімкніть логування запитів (<code>logger: true</code> у Drizzle, <code>log: ["query"]</code> у Prisma) і подивіться на один HTTP-запит — якщо бачите 101 однаковий SQL з різними id, ось воно. У GraphQL це системна проблема, тому там стандарт — DataLoader, який збирає всі <code>load(id)</code> за один тік event loop в один <code>IN</code>-запит.</p>
+
+<h3>З'єднання, стиснення, HTTP/2</h3>
+<p><strong>Пул з'єднань (connection pooling).</strong> Відкриття TCP-з'єднання і автентифікація в Postgres коштують 20–50 мс і пам'ять на бекенді. Тому драйвер тримає пул готових з'єднань (<code>pg.Pool</code>, <code>max: 10–20</code>) і перевикористовує їх. При serverless чи багатьох репліках з'єднань стає забагато — тоді ставлять зовнішній пулер (PgBouncer, Supavisor, Neon pooler).</p>
+<p><strong>Стиснення.</strong> Текстові відповіді (JSON, HTML, JS) стискаються у 5–10 разів. Brotli трохи кращий за gzip для статики (стискати заздалегідь при збірці), gzip швидший для динаміки. Робити це краще на reverse proxy (Caddy робить автоматично), а не в Node.</p>
+<p><strong>Keep-alive і HTTP/2.</strong> HTTP/1.1 keep-alive перевикористовує TCP-з'єднання між запитами (заощаджує рукостискання). HTTP/2 мультиплексує багато запитів в одному з'єднанні і стискає заголовки — особливо помітно для сторінок з десятками ресурсів. Вмикається на proxy (Caddy — за замовчуванням, nginx — <code>listen 443 ssl http2</code>). Для вихідних запитів з Node до інших сервісів — <code>new Agent({ keepAlive: true })</code> або undici, який робить це сам.</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам: пришвидшити API нотаток у 10 разів</div>
+  <ol>
+    <li>Заповніть базу: 1 000 користувачів, 200 000 нотаток (скрипт з faker, вставка пачками по 1 000).</li>
+    <li>Зробіть <code>GET /api/notes?userId=42</code> з автором кожної нотатки навмисно через N+1. Виміряйте autocannon: запишіть p50, p99, RPS.</li>
+    <li>Увімкніть логування SQL і порахуйте запити на один HTTP-виклик.</li>
+    <li>Замініть на JOIN. Виміряйте знову. Потім <code>EXPLAIN ANALYZE</code> — знайдіть Seq Scan, додайте індекс <code>(user_id, created_at DESC)</code>. Виміряйте.</li>
+    <li>Додайте cache-aside у Redis на 60 с з інвалідацією при POST. Виміряйте. Порівняйте p50 і p99 — p99 має впасти найбільше.</li>
+    <li>Додайте ETag і <code>Cache-Control: private, no-cache</code>. У DevTools перевірте 304 при повторному запиті.</li>
+    <li>Складіть таблицю: етап → p50 → p99 → RPS. Це і є ваш звіт про продуктивність.</li>
+  </ol>
+</div>
+
+<h2 id="s10">10. Фронтенд-продуктивність коротко</h2>
+<p>Найшвидший API не врятує сторінку, яка вантажить 3 МБ JavaScript. Кілька головних важелів:</p>
+<ul>
+  <li><strong>Розмір бандла.</strong> Перевіряйте, що потрапляє в бандл (<code>vite-bundle-visualizer</code>, <code>@next/bundle-analyzer</code>). Типові винуватці: moment.js замість date-fns або Temporal, lodash цілком замість окремих функцій, іконки всі одразу. Tree-shaking працює лише з ES-модулями.</li>
+  <li><strong>Розділення коду і lazy loading.</strong> <code>React.lazy(() =&gt; import("./HeavyChart"))</code> + <code>Suspense</code>: важкий компонент вантажиться, коли справді потрібен. Next.js робить це по маршрутах автоматично; <code>next/dynamic</code> — для компонентів.</li>
+  <li><strong>Зображення.</strong> Найбільша частина ваги більшості сторінок. WebP/AVIF замість JPEG/PNG (у 2–3 рази менші), <code>srcset</code>/<code>sizes</code> для різних екранів, <code>loading="lazy"</code> для того, що нижче згину, явні <code>width</code>/<code>height</code> проти стрибків верстки. <code>next/image</code> робить усе це.</li>
+  <li><strong>Шрифти.</strong> <code>font-display: swap</code>, підмножини (subset) лише потрібних символів, preload для головного шрифту. <code>next/font</code> — self-hosting без запитів до Google.</li>
+  <li><strong>Критичний шлях.</strong> Блокуючі скрипти в <code>&lt;head&gt;</code> без <code>defer</code>, CSS на 500 КБ, третій сторони (аналітика, чати) — усе, що стоїть між HTML і першим рендером.</li>
+</ul>
+<p><strong>Lighthouse</strong> (у Chrome DevTools або <code>npx lighthouse URL</code>) дає оцінку і конкретний список проблем. Метрики Core Web Vitals: <strong>LCP</strong> (Largest Contentful Paint — коли з'явився головний контент, ціль &lt; 2,5 с), <strong>INP</strong> (Interaction to Next Paint — відгук на клік, &lt; 200 мс), <strong>CLS</strong> (Cumulative Layout Shift — стрибки верстки, &lt; 0,1). Важливо: Lighthouse — лабораторні дані на вашому ноутбуці; реальні користувачі з телефонами в метро дають польові дані (CrUX, web-vitals бібліотека) — саме вони враховуються Google і саме на них треба дивитися.</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Наступний рівень: <strong>Service Worker</strong> з Workbox — програмований кеш у браузері, офлайн-режим, стратегії cache-first/network-first на рівні URL; <strong>ISR</strong> (Incremental Static Regeneration) — статичні сторінки, які перегенеруються у фоні за TTL, поєднання швидкості статики зі свіжістю; <strong>Edge caching API</strong> з ключем за користувачем через <code>Vary: Cookie</code> на Fastly/Cloudflare Workers; <strong>кеш з версіонуванням у ключі</strong> замість інвалідації: <code>notes:user:42:v{updatedAt}</code> — старі ключі просто протухають за TTL, а промахів через гонки не буває; <strong>probabilistic early expiration</strong> (алгоритм XFetch з paper «Optimal Probabilistic Cache Stampede Prevention») — елегантне рішення stampede без замків; і <strong>continuous profiling</strong> у продакшені (Pyroscope, Datadog Profiler), бо профіль під autocannon і профіль під реальними користувачами — різні речі.</p>
+</div>
+
+<h2 id="s11">11. Симптом → причина → інструмент</h2>
+<div class="table-wrap">
+<table>
+  <tr><th>Симптом</th><th>Ймовірна причина</th><th>Інструмент діагностики</th><th>Типове рішення</th></tr>
+  <tr><td>p50 нормальний, p99 у 20+ разів більший</td><td>Промахи кешу, GC-паузи, lock у БД, stampede</td><td>Гістограма латентності, логи з тривалістю, <code>--cpu-prof</code></td><td>stale-while-revalidate, single-flight, менше алокацій</td></tr>
+  <tr><td>Один HTTP-запит → десятки SQL</td><td>N+1</td><td>Логування запитів ORM, pg_stat_statements</td><td>JOIN, batching/DataLoader, <code>with: {}</code></td></tr>
+  <tr><td>Повільний один конкретний запит</td><td>Немає індексу, Seq Scan, застаріла статистика</td><td><code>EXPLAIN (ANALYZE, BUFFERS)</code>, pg_stat_statements</td><td>Складений індекс, <code>ANALYZE</code>, переписати запит</td></tr>
+  <tr><td>Усі запити повільні під навантаженням, CPU БД низький</td><td>Вичерпано пул з'єднань, чергування</td><td>pg_stat_activity, метрики пулу (waiting count)</td><td>Збільшити пул, PgBouncer, кеш</td></tr>
+  <tr><td>Усі запити повільні, CPU Node 100 %</td><td>Синхронний код блокує event loop</td><td>Clinic doctor, <code>--cpu-prof</code>, event loop lag метрика</td><td>Винести у worker_threads, кеш, стрімінг</td></tr>
+  <tr><td>Користувач бачить старі дані після зміни</td><td>Забута інвалідація, <code>public</code> замість <code>private</code>, довгий max-age</td><td>DevTools Network (from cache?), заголовки відповіді, <code>redis-cli MONITOR</code></td><td>Подієва інвалідація, тег, коротший TTL, коректні заголовки</td></tr>
+  <tr><td>Після деплою стара версія фронтенду</td><td>HTML закешовано з max-age, або статика без хешу</td><td>Заголовки на HTML і JS, CDN cache status</td><td><code>no-cache</code> на HTML, хеш + <code>immutable</code> на статику, purge CDN</td></tr>
+  <tr><td>Повільно лише з інших країн</td><td>Немає CDN, origin в одному регіоні, немає keep-alive</td><td>WebPageTest з різних локацій, TTFB по регіонах</td><td>CDN перед статикою і публічним API, HTTP/2</td></tr>
+  <tr><td>Сторінка довго «біла», API швидкий</td><td>Великий бандл, блокуючі скрипти, важкі зображення</td><td>Lighthouse, bundle analyzer, Network waterfall</td><td>Code splitting, lazy, WebP/AVIF, defer</td></tr>
+  <tr><td>Пам'ять Redis росте без меж</td><td>Ключі без TTL</td><td><code>redis-cli INFO memory</code>, <code>SCAN</code> + <code>TTL</code></td><td>TTL на всьому, <code>maxmemory-policy allkeys-lru</code></td></tr>
+  <tr><td>Латентність росте раз на N хвилин</td><td>Одночасне протухання ключів, cron, VACUUM</td><td>Графік латентності накладений на графік хітів кешу</td><td>Jitter у TTL, рознести cron, autovacuum tuning</td></tr>
+</table>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим <code>no-cache</code> відрізняється від <code>no-store</code>?</summary><p><code>no-cache</code> дозволяє зберігати відповідь, але вимагає перевірити її актуальність у сервера перед кожним використанням (умовний запит з ETag → 304). <code>no-store</code> забороняє зберігати взагалі. «Не кешувати» — це <code>no-store</code>.</p></details>
+  <details><summary>2. Як працює зв'язка ETag + 304?</summary><p>Сервер віддає відповідь з ETag (хеш вмісту). Наступного разу браузер надсилає <code>If-None-Match</code> з цим хешем. Якщо вміст не змінився, сервер відповідає <code>304 Not Modified</code> без тіла, і браузер використовує свою копію — заощаджуючи трафік.</p></details>
+  <details><summary>3. Чому статику можна кешувати на рік з <code>immutable</code>?</summary><p>Бо в імені файлу є хеш вмісту (<code>app.3f9a2c.js</code>). Зміна вмісту → новий хеш → новий URL. Старий файл за старим URL справді ніколи не зміниться, тож його безпечно тримати назавжди. HTML, який посилається на файли, при цьому має бути <code>no-cache</code>.</p></details>
+  <details><summary>4. Що таке cache stampede і як його лікують?</summary><p>Коли популярний ключ протухає і сотні запитів одночасно бачать промах і біжать у базу з одним запитом. Ліки: замок (лише один перераховує, решта чекають або беруть stale), early refresh (оновлення у фоні до закінчення TTL), jitter (випадковий TTL, щоб ключі не протухали разом).</p></details>
+  <details><summary>5. Чому середня латентність — погана метрика?</summary><p>Вона ховає хвіст: 99 запитів по 10 мс і один по 5 с дають середнє 60 мс, хоча один зі ста користувачів чекав 5 секунд. Перцентилі (p95, p99) показують, що відчуває «найнещасніша» частина користувачів, а гістограма — форму розподілу.</p></details>
+  <details><summary>6. Що таке N+1 і як його помітити?</summary><p>Один запит за списком і по одному запиту на кожен елемент списку — 1 + N. Помітити: увімкнути логування SQL і подивитися на один HTTP-запит — багато однакових запитів з різними id. Лікувати: JOIN або batching через <code>IN</code> (DataLoader).</p></details>
+  <details><summary>7. Cache-aside чи write-through для списку нотаток користувача?</summary><p>Cache-aside: списки читаються набагато частіше, ніж змінюються, і кешувати варто лише те, що справді запитують. При записі — інвалідація ключа списку. Write-through виправданий, коли після запису дані майже гарантовано одразу читатимуть, і промах неприпустимий.</p></details>
+  <details><summary>8. Навіщо <code>Vary</code>?</summary><p>Щоб кеш (особливо спільний — CDN) розрізняв версії відповіді, які залежать від заголовка запиту: мова, стиснення, cookie. Без <code>Vary: Accept-Language</code> CDN віддасть одну мову всім.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>Кеш — копія ближче або швидше; ціна — застарілість. Перед кожним кешем питайте: «скільки секунд застарілості прийнятно?»</li>
+  <li>Шари: браузер → CDN → proxy → Redis → буфери БД → диск. Чим раніше хіт, тим дешевше.</li>
+  <li><code>Cache-Control</code> керує HTTP-кешем: <code>max-age</code>/<code>s-maxage</code> — TTL, <code>no-cache</code> — перевіряти, <code>no-store</code> — не зберігати, <code>private</code> — для персонального, <code>stale-while-revalidate</code> — миттєво + оновити у фоні.</li>
+  <li>ETag + <code>If-None-Match</code> → 304 економить тіло відповіді; хеш в імені + <code>immutable</code> — кеш статики назавжди.</li>
+  <li>Серверні патерни: cache-aside (найпоширеніший), read-through, write-through, write-behind. Ключ з простором імен, завжди TTL, jitter.</li>
+  <li>Інвалідація: TTL (просто, обмежена застарілість) + подієва (свіжо, треба знати всі ключі) + теги. Stampede лікують замком, early refresh, jitter.</li>
+  <li>Вимірюйте перцентилями (p50/p95/p99), не середнім; профілюйте Node (<code>--cpu-prof</code>, Clinic), читайте <code>EXPLAIN ANALYZE</code>, шукайте N+1 у логах SQL.</li>
+  <li>Пул з'єднань, стиснення на proxy, HTTP/2, keep-alive — дешеві перемоги; на фронтенді — бандл, lazy, зображення, Lighthouse і польові Web Vitals.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching" target="_blank" rel="noopener">MDN: HTTP caching</a> — найзрозуміліше пояснення Cache-Control, свіжості, валідації і Vary з прикладами.</li>
+    <li><a href="https://web.dev/articles/http-cache" target="_blank" rel="noopener">web.dev: Prevent unnecessary network requests with the HTTP Cache</a> — практичний гайд від Google з дерева рішень «які заголовки ставити».</li>
+    <li><a href="https://www.rfc-editor.org/rfc/rfc9111" target="_blank" rel="noopener">RFC 9111: HTTP Caching</a> — першоджерело; читати розділи про директиви і про stale responses, коли документація не дає точної відповіді.</li>
+    <li><a href="https://www.cloudflare.com/learning/cdn/what-is-a-cdn/" target="_blank" rel="noopener">Cloudflare Learning: What is a CDN?</a> — як влаштована CDN, edge, origin, з ілюстраціями.</li>
+    <li><a href="https://redis.io/docs/latest/develop/use/patterns/" target="_blank" rel="noopener">Redis Docs: Patterns</a> — офіційні патерни використання Redis, включно з кешуванням і розподіленими замками.</li>
+    <li><a href="https://martinfowler.com/bliki/TwoHardThings.html" target="_blank" rel="noopener">Martin Fowler: TwoHardThings</a> — походження жарту про інвалідацію кешу і всі його варіації.</li>
+    <li><a href="https://dataintensive.net/" target="_blank" rel="noopener">«Designing Data-Intensive Applications», Martin Kleppmann</a> — розділи про зберігання, реплікацію і кешування; найкраща книга про дані у розподілених системах.</li>
+    <li><a href="https://nodejs.org/en/learn/diagnostics" target="_blank" rel="noopener">Node.js Diagnostics Guide</a> — офіційні гайди з профілювання CPU, пам'яті, витоків і поганої продуктивності.</li>
+    <li><a href="https://www.brendangregg.com/blog/2017-05-09/cpu-utilization-is-wrong.html" target="_blank" rel="noopener">Brendan Gregg: CPU Utilization is Wrong</a> — чому усереднені метрики брешуть; від автора flame graphs.</li>
+    <li><a href="https://www.brendangregg.com/flamegraphs.html" target="_blank" rel="noopener">Brendan Gregg: Flame Graphs</a> — як читати flame graph з CPU-профілю.</li>
+    <li><a href="https://use-the-index-luke.com/" target="_blank" rel="noopener">Use The Index, Luke!</a> — безкоштовна книга про індекси для розробників: чому запит повільний і як читати план.</li>
+    <li><a href="https://www.postgresql.org/docs/current/using-explain.html" target="_blank" rel="noopener">PostgreSQL: Using EXPLAIN</a> — офіційна документація з розбором прикладів планів.</li>
+    <li><a href="https://tanstack.com/query/latest/docs/framework/react/guides/caching" target="_blank" rel="noopener">TanStack Query: Caching</a> — staleTime, gcTime, інвалідація, дедуплікація на прикладах.</li>
+    <li><a href="https://web.dev/articles/vitals" target="_blank" rel="noopener">web.dev: Core Web Vitals</a> — LCP, INP, CLS: що вимірюють, пороги, як покращити.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 12</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

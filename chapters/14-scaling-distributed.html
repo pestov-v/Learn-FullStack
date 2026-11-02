@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>14. Масштабування і розподілені системи — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 14 · <span class="level-badge level-3">Про</span></div>
+  <h1>Масштабування і розподілені системи</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, що робити, коли один сервер уже не витягує: як додавати сервери, ділити базу, балансувати трафік — і які нові, дуже неочевидні проблеми з'являються, щойно комп'ютерів стає більше одного.</p>
+  <div class="meta"><span>⏱ ~100 хв</span><span>📚 Передумови: розділи 05, 10, 12, 13</span><span>🎯 Ціль: спроєктувати систему на 10 000 запитів/с і пояснити, де вона зламається</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Вертикальне і горизонтальне масштабування</a></li>
+    <li><a href="#s2">Stateless-сервери: де тримати стан</a></li>
+    <li><a href="#s3">Балансування навантаження: L4, L7, алгоритми, DNS</a></li>
+    <li><a href="#s4">Масштабування бази даних: пул, репліки, failover</a></li>
+    <li><a href="#s5">Партиціонування і шардінг, consistent hashing</a></li>
+    <li><a href="#s6">CAP, PACELC і моделі консистентності</a></li>
+    <li><a href="#s7">Консенсус: Raft, etcd, розподілені блокування</a></li>
+    <li><a href="#s8">Час і порядок: чому годинники брешуть</a></li>
+    <li><a href="#s9">Захист від перевантаження: rate limiting, backpressure, load shedding</a></li>
+    <li><a href="#s10">Multi-region і швидкість світла</a></li>
+    <li><a href="#s11">Оцінка навантаження "на серветці"</a></li>
+    <li><a href="#s12">Типові помилки</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви, що ти возиш вантаж на одному коні. Вантажу стає більше. Можна купити більшого коня — він тягне більше, але найбільший кінь у світі все одно має межу, і коли він захворіє, ти не возиш нічого. А можна купити ще п'ять звичайних коней і запрягти їх разом. Тепер якщо один захворів, решта чотири тягнуть далі. Але з'являються нові турботи: коней треба годувати всіх, вони мають бігти в один бік, і якщо кожен кінь "пам'ятає" своє власне, то коли ти пересядеш на іншого, він не знатиме, куди ти вже їздив.</p>
+  <p><b>Масштабування (scaling)</b> — це саме про це: як зробити так, щоб систему тягнуло багато звичайних серверів, і як домовитися між ними, хто що пам'ятає і хто головний.</p>
+</div>
+
+<h2 id="s1">1. Вертикальне і горизонтальне масштабування</h2>
+<p><b>Вертикальне масштабування (vertical scaling, scale up)</b> — більший кінь: замість сервера з 4 ядрами і 16 ГБ берете 64 ядра і 512 ГБ. Плюси: нічого не треба міняти в коді, немає розподілених проблем, база даних на одній машині зберігає всі свої гарантії транзакцій. Мінуси: ціна росте швидше за потужність (найбільші машини коштують непропорційно дорого), є фізична стеля, і сервер лишається єдиною точкою відмови. Не зневажайте цей шлях: сучасний сервер із 96 ядрами і NVMe-дисками витягує навантаження, для якого 15 років тому був потрібен цілий кластер.</p>
+<p><b>Горизонтальне масштабування (horizontal scaling, scale out)</b> — більше коней: замість одного великого сервера — 20 звичайних. Плюси: майже без стелі, відмова одного — це втрата 5% потужності, а не 100%; можна додавати і забирати сервери автоматично залежно від навантаження (autoscaling). Мінуси: усе, про що цей розділ, — координація, консистентність, мережеві відмови.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Вертикальне проти горизонтального масштабування">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="180" y="26" text-anchor="middle" class="bold">Вертикальне: більший кінь</text>
+    <rect x="60" y="180" width="80" height="60" rx="10" class="blue"/><text x="100" y="205" text-anchor="middle" class="small">4 CPU</text><text x="100" y="225" text-anchor="middle" class="muted">16 ГБ</text>
+    <path d="M150 210 L200 210" class="arrow"/>
+    <rect x="200" y="60" width="140" height="180" rx="14" class="blue"/><text x="270" y="140" text-anchor="middle" class="bold">64 CPU</text><text x="270" y="165" text-anchor="middle" class="muted">512 ГБ</text><text x="270" y="190" text-anchor="middle" class="muted small">одна точка відмови</text>
+    <text x="180" y="275" text-anchor="middle" class="muted">простіше, але є стеля і ціна ×10</text>
+
+    <text x="560" y="26" text-anchor="middle" class="bold">Горизонтальне: більше коней</text>
+    <rect x="420" y="60" width="130" height="50" rx="10" class="purple"/><text x="485" y="90" text-anchor="middle" class="small">балансувальник</text>
+    <path d="M440 110 L420 160" class="arrow"/><path d="M470 110 L480 160" class="arrow"/><path d="M510 110 L540 160" class="arrow"/><path d="M540 105 L610 160" class="arrow"/>
+    <rect x="395" y="160" width="55" height="60" rx="8" class="blue"/><text x="422" y="195" text-anchor="middle" class="small">4 CPU</text>
+    <rect x="458" y="160" width="55" height="60" rx="8" class="blue"/><text x="485" y="195" text-anchor="middle" class="small">4 CPU</text>
+    <rect x="521" y="160" width="55" height="60" rx="8" class="blue"/><text x="548" y="195" text-anchor="middle" class="small">4 CPU</text>
+    <rect x="584" y="160" width="55" height="60" rx="8" class="red"/><text x="611" y="195" text-anchor="middle" class="small">✘</text>
+    <rect x="647" y="160" width="55" height="60" rx="8" class="blue"/><text x="674" y="195" text-anchor="middle" class="small">+1</text>
+    <path d="M580 105 L670 160" class="arrow dashed"/>
+    <text x="560" y="250" text-anchor="middle" class="muted">один упав — решта тягнуть; новий додається за хвилину</text>
+    <text x="560" y="275" text-anchor="middle" class="muted">але: стан, координація, мережа</text>
+  </svg>
+  <figcaption>Ліворуч — одна велика машина; праворуч — багато однакових за балансувальником. Правий варіант переживає відмову і масштабується автоматично, але вимагає, щоб сервери були взаємозамінними.</figcaption>
+</figure>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Горизонтальне масштабування — це не лише про продуктивність, а й про <b>доступність (availability)</b>. Навіть якщо один сервер витягує ваше навантаження, два сервери за балансувальником дають можливість оновлювати код без простою (по черзі), переживати падіння заліза і перезавантажуватися вдень, а не о 4 ранку. Тому "два сервери" — це часто мінімальна продакшен-конфігурація, навіть для невеликого проєкту.</p>
+</div>
+
+<h2 id="s2">2. Stateless-сервери: де тримати стан</h2>
+<p>Щоб можна було додати десятий сервер або вбити третій, сервери мають бути <b>взаємозамінними</b>: будь-який запит будь-якого користувача може обробити будь-який сервер. Це означає, що сервер не має тримати <b>стан (state)</b>, що потрібен між запитами. Такий сервер називають <b>stateless</b>. Що зазвичай ламає цю властивість:</p>
+<ul>
+  <li><b>Сесії в пам'яті процесу</b> (<code>express-session</code> з MemoryStore): користувач залогінився на сервері A, наступний запит потрапив на B — і він "не залогінений".</li>
+  <li><b>Файли на локальному диску</b>: користувач завантажив аватар на сервер A, а сторінку віддає B, у якого цього файлу немає.</li>
+  <li><b>Кеш у пам'яті</b>: не ламає коректність, але кожен сервер гріє свій кеш окремо, і після деплою всі 20 серверів одночасно йдуть у БД.</li>
+  <li><b>Локальні cron-задачі й лічильники</b>: 20 серверів — 20 разів надіслана розсилка.</li>
+</ul>
+<p>Куди виносити стан:</p>
+<div class="table-wrap">
+<table>
+  <tr><th>Тип стану</th><th>Куди</th><th>Чому</th></tr>
+  <tr><td>Сесії, кеш, лічильники rate limit</td><td>Redis / Valkey / Memcached</td><td>Мілісекундний доступ із будь-якого сервера, TTL "з коробки", атомарні інкременти</td></tr>
+  <tr><td>Або сесії без сервера взагалі</td><td>JWT у cookie</td><td>Стан несе клієнт; сервер лише перевіряє підпис. Мінус — важко відкликати</td></tr>
+  <tr><td>Файли користувачів</td><td>Object storage: S3, GCS, R2, MinIO</td><td>Безмежний обсяг, доступ по HTTP з CDN, сервери нічого не тримають</td></tr>
+  <tr><td>Фонові задачі</td><td>Черга (BullMQ, RabbitMQ) + окремі воркери</td><td>Задача виконається рівно на одному воркері; сервери API не роблять важку роботу</td></tr>
+  <tr><td>Розклад (cron)</td><td>Один виділений процес або розподілений lock</td><td>Інакше кожна копія запустить задачу</td></tr>
+  <tr><td>Конфігурація</td><td>Змінні оточення / etcd / Consul</td><td>Однакова для всіх копій, змінюється централізовано</td></tr>
+</table>
+</div>
+
+<pre><code class="language-js">// сесії в Redis замість пам'яті процесу — тепер сервери взаємозамінні
+import express from 'express';
+import session from 'express-session';
+import { RedisStore } from 'connect-redis';
+import { createClient } from 'redis';
+
+const redis = createClient({ url: process.env.REDIS_URL });
+await redis.connect();
+
+const app = express();
+app.use(session({
+  store: new RedisStore({ client: redis, prefix: 'sess:' }),
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, secure: true, maxAge: 7 * 24 * 3600 * 1000 },
+}));
+// будь-яка копія сервера прочитає ту саму сесію за cookie</code></pre>
+
+<h2 id="s3">3. Балансування навантаження: L4, L7, алгоритми, DNS</h2>
+<p><b>Балансувальник навантаження (load balancer, LB)</b> — це швейцар, який стоїть перед рядом однакових серверів і каже кожному відвідувачу, до якого віконця йти. Він знає, які віконця живі, і розподіляє чергу так, щоб ніхто не стояв без діла.</p>
+<p>Два рівні, на яких він може працювати (номери — з моделі OSI):</p>
+<ul>
+  <li><b>L4 (транспортний рівень)</b>: балансувальник бачить лише IP і порт, він передає TCP-байти далі, не заглядаючи всередину. Дуже швидкий (мільйони з'єднань), працює для будь-якого протоколу (не тільки HTTP), не потребує TLS-ключів. Приклади: AWS NLB, HAProxy в режимі tcp, IPVS у Linux.</li>
+  <li><b>L7 (прикладний рівень)</b>: балансувальник розбирає HTTP, бачить URL, заголовки, cookie. Може маршрутизувати <code>/api/*</code> на один пул, <code>/static/*</code> на інший, термінувати TLS, стискати, кешувати, робити A/B. Повільніший і "розумніший". Приклади: NGINX, HAProxy http, Envoy, Traefik, AWS ALB, Cloudflare.</li>
+</ul>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Алгоритми балансування навантаження">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="120" width="110" height="60" rx="12" class="accent"/><text x="75" y="145" text-anchor="middle" class="bold small">клієнти</text><text x="75" y="165" text-anchor="middle" class="muted">r1 r2 r3 r4 r5</text>
+    <path d="M130 150 L210 150" class="arrow"/>
+    <rect x="210" y="90" width="170" height="120" rx="14" class="purple"/>
+    <text x="295" y="118" text-anchor="middle" class="bold">L7 балансувальник</text>
+    <text x="295" y="142" text-anchor="middle" class="small">health check /healthz</text>
+    <text x="295" y="162" text-anchor="middle" class="small">кожні 5 с</text>
+    <text x="295" y="188" text-anchor="middle" class="mono small">алгоритм: ?</text>
+    <path d="M380 110 L470 60" class="arrow"/><path d="M380 140 L470 140" class="arrow"/><path d="M380 170 L470 220" class="arrow dashed"/><path d="M380 190 L470 290" class="arrow"/>
+    <rect x="470" y="35" width="120" height="50" rx="10" class="blue"/><text x="530" y="56" text-anchor="middle" class="small">сервер A</text><text x="530" y="74" text-anchor="middle" class="muted">2 активні</text>
+    <rect x="470" y="115" width="120" height="50" rx="10" class="blue"/><text x="530" y="136" text-anchor="middle" class="small">сервер B</text><text x="530" y="154" text-anchor="middle" class="muted">7 активних</text>
+    <rect x="470" y="195" width="120" height="50" rx="10" class="red"/><text x="530" y="216" text-anchor="middle" class="small">сервер C</text><text x="530" y="234" text-anchor="middle" class="muted">health ✘ — виключено</text>
+    <rect x="470" y="265" width="120" height="50" rx="10" class="blue"/><text x="530" y="286" text-anchor="middle" class="small">сервер D (вага 3)</text><text x="530" y="304" text-anchor="middle" class="muted">потужніша машина</text>
+    <text x="675" y="50" text-anchor="start" class="small">round robin:</text><text x="675" y="66" text-anchor="start" class="mono small">A B D A B D…</text>
+    <text x="675" y="130" text-anchor="start" class="small">least conn:</text><text x="675" y="146" text-anchor="start" class="mono small">→ A (2 &lt; 7)</text>
+    <text x="675" y="280" text-anchor="start" class="small">weighted:</text><text x="675" y="296" text-anchor="start" class="mono small">D отримує 3/5</text>
+  </svg>
+  <figcaption>Балансувальник опитує health check і виключає мертвий сервер C. Далі обирає живий сервер за алгоритмом: по колу, за найменшою кількістю активних з'єднань, або з урахуванням ваги.</figcaption>
+</figure>
+
+<h3>Алгоритми вибору сервера</h3>
+<ul>
+  <li><b>Round robin (по колу)</b>: перший запит — A, другий — B, третій — C, знову A. Простий, добре працює, коли запити однакові за вартістю.</li>
+  <li><b>Weighted round robin</b>: те саме, але потужнішому серверу дають більше "ходів".</li>
+  <li><b>Least connections (найменше з'єднань)</b>: новий запит іде туди, де зараз найменше активних. Кращий, коли запити різні за тривалістю (довгі завантаження, WebSocket).</li>
+  <li><b>IP hash</b>: сервер обирається за хешем IP клієнта — той самий клієнт завжди потрапляє на той самий сервер. Дешевий спосіб "прилипання", але ламається, коли за одним NAT сидить офіс на 500 людей.</li>
+  <li><b>Random / power of two choices</b>: обираємо два випадкових сервери і беремо менш завантажений. На диво близький до оптимуму і не потребує глобального стану — улюблений алгоритм великих систем.</li>
+</ul>
+
+<pre><code class="language-nginx"># nginx.conf — L7 балансування з health check і вагами
+upstream api {
+    least_conn;                        # алгоритм: найменше активних з'єднань
+    server 10.0.1.11:3000 weight=1 max_fails=3 fail_timeout=10s;
+    server 10.0.1.12:3000 weight=1 max_fails=3 fail_timeout=10s;
+    server 10.0.1.13:3000 weight=3;    # потужніша машина — втричі більше трафіку
+    keepalive 64;                      # тримати з'єднання до бекендів відкритими
+}
+server {
+    listen 443 ssl http2;
+    location /api/ {
+        proxy_pass http://api;
+        proxy_connect_timeout 2s;      # таймаут на з'єднання з бекендом
+        proxy_read_timeout 10s;        # таймаут на відповідь
+        proxy_next_upstream error timeout http_503;  # при помилці — спробувати інший сервер
+        proxy_set_header X-Request-Id $request_id;   # correlation id
+    }
+}</code></pre>
+
+<h3>Health checks</h3>
+<p>Балансувальник періодично викликає <code>GET /healthz</code>. Тут важлива різниця між <b>liveness</b> ("процес живий?") і <b>readiness</b> ("готовий приймати трафік?"). Сервер, що щойно стартував і ще гріє кеш, живий, але не готовий; сервер, що завершує роботу під час деплою, має спочатку сказати "не готовий", дообробити активні запити і лише потім вийти (<b>graceful shutdown</b>). Health check має перевіряти залежності (БД, Redis) обережно: якщо БД лягла, і всі 20 серверів одночасно скажуть "не готовий", балансувальник виключить усіх — і навіть сторінка "тимчасово недоступно" не віддасться.</p>
+
+<h3>Sticky sessions і чому вони небажані</h3>
+<p><b>Липкі сесії (sticky sessions)</b> — балансувальник ставить cookie і завжди відправляє клієнта на той самий сервер. Це милиця для застосунків зі станом у пам'яті. Проблеми: нерівномірне навантаження (один сервер "прилип" до важких користувачів), при падінні сервера всі його користувачі втрачають сесії, деплой стає болючим. Правильна відповідь — stateless-сервери з розділу 2. Виправдана sticky-конфігурація одна: WebSocket-з'єднання, які й так довгоживучі.</p>
+
+<h3>DNS-балансування, GeoDNS, anycast</h3>
+<p>Балансувальник теж може впасти, тому їх ставлять два (active-passive з "плаваючою" IP-адресою) або більше. Ще вище — <b>DNS-балансування</b>: ім'я <code>api.example.com</code> резолвиться в кілька IP, і клієнти беруть різні. Грубий інструмент: DNS кешується хвилинами, клієнт не знає, що IP помер. <b>GeoDNS</b> віддає різні IP залежно від країни клієнта — користувачі з Європи йдуть у Франкфурт, з Азії — у Сінгапур. <b>Anycast</b> — одна й та сама IP-адреса анонсується з десятків дата-центрів, і маршрутизатори інтернету самі ведуть пакет до найближчого. Так працюють Cloudflare, Google DNS 8.8.8.8 і великі CDN: ви завжди потрапляєте в найближчу точку, і при її падінні мережа сама перемаршрутизує.</p>
+
+<h2 id="s4">4. Масштабування бази даних: пул, репліки, failover</h2>
+<p>Сервери масштабувати легко — вони stateless. Уся складність зосереджується в базі даних, бо саме там стан. Кроки, у порядку від дешевих до дорогих:</p>
+
+<h3>Крок 0: connection pooling</h3>
+<p>PostgreSQL створює окремий процес на кожне з'єднання, і кожне коштує кілька мегабайт та мілісекунд на встановлення. 20 серверів по 20 з'єднань — це 400 процесів, і БД більше часу перемикає контексти, ніж працює. <b>Пул з'єднань (connection pool)</b> тримає невелику кількість відкритих з'єднань і роздає їх запитам по черзі. Пул є в кожному драйвері (<code>pg.Pool</code>), але коли серверів багато, ставлять зовнішній пулер — <b>PgBouncer</b>: 20 серверів по 100 "віртуальних" з'єднань до PgBouncer, а він тримає 30 реальних до PostgreSQL.</p>
+
+<pre><code class="language-ini"># pgbouncer.ini — режим transaction: з'єднання повертається в пул після кожної транзакції
+[databases]
+shop = host=10.0.2.5 port=5432 dbname=shop
+
+[pgbouncer]
+listen_port = 6432
+pool_mode = transaction       # найефективніший; але не працює з session-level фічами (SET, prepared statements по імені)
+max_client_conn = 2000        # скільки клієнтів можуть підключитися до PgBouncer
+default_pool_size = 30        # скільки реальних з'єднань до PostgreSQL на базу
+reserve_pool_size = 5</code></pre>
+
+<h3>Крок 1: read replicas</h3>
+<p>Типовий застосунок читає у 10–100 разів частіше, ніж пише. <b>Реплікація (replication)</b> — <b>primary</b> (головний) приймає всі записи і пересилає журнал змін (WAL) на одну чи кілька <b>replica</b> (копій), які приймають лише читання. Застосунок пише в primary, а <code>SELECT</code> розкидає по репліках.</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Primary, репліки і проблема read-your-writes">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="120" width="120" height="70" rx="12" class="accent"/><text x="80" y="150" text-anchor="middle" class="bold small">Застосунок</text><text x="80" y="170" text-anchor="middle" class="muted">API-сервер</text>
+    <rect x="300" y="40" width="160" height="80" rx="14" class="green"/><text x="380" y="70" text-anchor="middle" class="bold">Primary</text><text x="380" y="92" text-anchor="middle" class="muted">усі INSERT/UPDATE</text>
+    <rect x="300" y="200" width="160" height="60" rx="14" class="blue"/><text x="380" y="225" text-anchor="middle" class="bold small">Replica 1</text><text x="380" y="245" text-anchor="middle" class="muted">лише SELECT</text>
+    <rect x="560" y="200" width="160" height="60" rx="14" class="blue"/><text x="640" y="225" text-anchor="middle" class="bold small">Replica 2</text><text x="640" y="245" text-anchor="middle" class="muted">лише SELECT</text>
+    <path d="M140 140 L300 85" class="arrow"/><text x="200" y="95" text-anchor="middle" class="mono small">1. UPDATE name='Оля'</text>
+    <path d="M140 170 L300 225" class="arrow"/><text x="195" y="215" text-anchor="middle" class="mono small">2. SELECT name</text>
+    <path d="M380 120 L380 200" class="arrow dashed"/><text x="430" y="165" text-anchor="middle" class="mono small">WAL, лаг 50 мс</text>
+    <path d="M460 100 L640 200" class="arrow dashed"/><text x="590" y="150" text-anchor="middle" class="mono small">WAL, лаг 2 с</text>
+    <rect x="160" y="280" width="440" height="34" rx="8" class="red"/>
+    <text x="380" y="302" text-anchor="middle" class="small">2 прийшов раніше за WAL → повернулося старе ім'я. Користувач: "я ж щойно змінив!"</text>
+  </svg>
+  <figcaption>Запис іде в primary, читання — в репліку. Репліка відстає на лаг реплікації, тому одразу після запису можна прочитати старі дані. Це називається порушенням read-your-writes.</figcaption>
+</figure>
+
+<p><b>Лаг реплікації (replication lag)</b> — затримка між записом на primary і появою його на репліці. Зазвичай мілісекунди, але під навантаженням чи при довгих транзакціях — секунди й хвилини. Проблема "<b>прочитав свій запис</b> (read-your-writes)": користувач змінив аватар, сторінка перезавантажилась і показала старий. Рішення:</p>
+<ul>
+  <li>Після запису кілька секунд читати цього користувача з primary (запам'ятати timestamp останнього запису в сесії/cookie).</li>
+  <li>Читати "свої" дані завжди з primary, чужі — з реплік (профіль — primary, стрічка — репліка).</li>
+  <li>Повертати клієнту LSN (позицію в WAL) після запису і чекати, поки репліка його дожене (<code>pg_wal_lsn_diff</code>).</li>
+</ul>
+
+<h3>Синхронна vs асинхронна реплікація</h3>
+<p><b>Асинхронна</b>: primary підтверджує COMMIT одразу і шле WAL "потім". Швидко; але якщо primary згорить до відправки, останні транзакції втрачені. <b>Синхронна</b>: primary чекає, поки хоча б одна репліка запише WAL на диск, і лише потім каже клієнту "готово". Нуль втрат, але кожен COMMIT довший на мережевий RTT, і якщо синхронна репліка недоступна — запис блокується. Компроміс, який використовують у продакшені: одна синхронна репліка в тому ж дата-центрі (для нуля втрат) + асинхронні в інших регіонах (для читання і disaster recovery).</p>
+
+<h3>Failover</h3>
+<p>Primary впав. Хтось має: помітити це, обрати нову primary серед реплік (ту, що найменше відстала), переключити на неї застосунки, і — критично важливо — <i>не дати старій primary прокинутися і думати, що вона все ще головна</i> (це називається <b>split-brain</b>, два "мозки"). Робити це руками о 3 ночі — погана ідея; для PostgreSQL є Patroni (використовує etcd/Consul для консенсусу, розділ 7), для хмар — RDS Multi-AZ, Cloud SQL HA. Час failover — від 10 секунд до хвилин; застосунок мусить це переживати: повторювати з'єднання, не тримати транзакцій відкритими надовго.</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>Репліки не масштабують запис.</b> Якщо ваша проблема — INSERT-и, репліки не допоможуть; навпаки, кожна репліка додає роботи primary. Потрібен шардінг.</li>
+    <li><b>Пулер + транзакційний режим</b> ламає <code>SET</code>, <code>LISTEN</code>, advisory locks на рівні сесії і prepared statements по імені. Prisma/Drizzle треба конфігурувати відповідно (<code>?pgbouncer=true</code>, або prepared statements off).</li>
+    <li><b>Довгі транзакції</b> блокують реплікацію і vacuum. Транзакція має жити мілісекунди, не секунди. Ніяких HTTP-викликів усередині транзакції.</li>
+  </ul>
+</div>
+
+<h2 id="s5">5. Партиціонування і шардінг, consistent hashing</h2>
+<p>Коли одна таблиця не влазить на один диск або одна primary не витягує запис, дані ділять. Два терміни, які часто плутають:</p>
+<ul>
+  <li><b>Партиціонування (partitioning)</b> — ділимо таблицю на частини <i>в межах однієї БД</i>. PostgreSQL робить це "з коробки": <code>PARTITION BY RANGE (created_at)</code> — окрема фізична таблиця на кожен місяць. Запити за один місяць читають одну партицію; старі партиції видаляються за мілісекунди (<code>DROP TABLE</code> замість <code>DELETE</code> мільйонів рядків). Транзакції і JOIN працюють як раніше.</li>
+  <li><b>Шардінг (sharding)</b> — ділимо дані <i>між різними серверами БД</i>. Кожен сервер (шард) тримає свою частину і не знає про інші. Це горизонтальне масштабування запису, і ціна — втрата транзакцій і JOIN між шардами.</li>
+</ul>
+
+<h3>Ключ шардування</h3>
+<p><b>Ключ шардування (shard key)</b> — поле, за яким визначаємо, на якому шарді живе рядок. Найважливіше рішення в шардінгу; змінити його потім майже неможливо. Дві стратегії:</p>
+<ul>
+  <li><b>Range (за діапазоном)</b>: користувачі з id 1–1M — шард 1, 1M–2M — шард 2. Плюс: діапазонні запити ефективні. Мінус: нові користувачі всі йдуть на останній шард — <b>гарячий шард (hot shard)</b>.</li>
+  <li><b>Hash (за хешем)</b>: <code>shard = hash(userId) % N</code>. Плюс: рівномірно. Мінус: діапазонні запити розлітаються по всіх шардах, а зміна N перемішує майже всі ключі.</li>
+</ul>
+<p>Саме остання проблема — "змінили кількість шардів із 4 на 5, і 80% даних треба перевезти" — привела до <b>consistent hashing (узгодженого хешування)</b>.</p>
+
+<figure>
+  <svg viewBox="0 0 760 360" role="img" aria-label="Кільце consistent hashing">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <circle cx="260" cy="180" r="130" fill="none" stroke="currentColor" stroke-width="2" class="muted"/>
+    <text x="260" y="40" text-anchor="middle" class="mono small">0 / 2³²</text>
+    <circle cx="260" cy="50" r="11" class="blue"/><text x="290" y="56" class="small bold">S1</text>
+    <circle cx="372" cy="115" r="11" class="blue"/><text x="392" y="120" class="small bold">S2</text>
+    <circle cx="372" cy="245" r="11" class="blue"/><text x="392" y="252" class="small bold">S3</text>
+    <circle cx="260" cy="310" r="11" class="blue"/><text x="290" y="330" class="small bold">S4</text>
+    <circle cx="148" cy="245" r="11" class="blue"/><text x="98" y="252" class="small bold">S5</text>
+    <circle cx="148" cy="115" r="11" class="green"/><text x="80" y="120" class="small bold">S6 новий</text>
+    <circle cx="330" cy="72" r="6" class="accent"/><text x="345" y="62" class="mono small">k1 → S2</text>
+    <circle cx="385" cy="180" r="6" class="accent"/><text x="400" y="185" class="mono small">k2 → S3</text>
+    <circle cx="200" cy="300" r="6" class="accent"/><text x="150" y="325" class="mono small">k3 → S4</text>
+    <circle cx="140" cy="180" r="6" class="accent"/><text x="40" y="185" class="mono small">k4 → S6</text>
+    <circle cx="175" cy="85" r="6" class="accent"/><text x="105" y="80" class="mono small">k5 → S1</text>
+    <path d="M330 78 C345 90 360 100 365 108" class="arrow"/>
+    <path d="M385 186 C382 205 378 225 374 236" class="arrow"/>
+    <path d="M140 186 C142 200 145 220 147 235" class="arrow dashed"/>
+    <path d="M147 173 C147 155 148 140 148 127" class="arrow"/>
+    <text x="580" y="80" class="small bold">Правило:</text>
+    <text x="580" y="102" class="small">ключ хешується на кільце</text>
+    <text x="580" y="122" class="small">і йде до першого сервера</text>
+    <text x="580" y="142" class="small">за годинниковою стрілкою</text>
+    <text x="580" y="180" class="small bold">Додали S6:</text>
+    <text x="580" y="202" class="small">переїхав лише k4</text>
+    <text x="580" y="222" class="small">(раніше йшов до S5)</text>
+    <text x="580" y="242" class="small">решта — на місці</text>
+    <text x="580" y="280" class="small bold">Віртуальні вузли:</text>
+    <text x="580" y="300" class="small">кожен сервер — 100–200</text>
+    <text x="580" y="320" class="small">точок на кільці, щоб</text>
+    <text x="580" y="340" class="small">розподіл був рівним</text>
+  </svg>
+  <figcaption>Consistent hashing: і сервери, і ключі відображаються на кільце. Ключ належить першому серверу за годинниковою стрілкою. Додавання сервера переміщує лише ключі з однієї дуги, а не всі.</figcaption>
+</figure>
+
+<p>Consistent hashing лежить в основі Amazon Dynamo, Cassandra, Riak, кешів на кшталт Memcached-клієнтів і балансувальників у CDN. У PostgreSQL-світі готове шардування дає Citus; у MongoDB — вбудований sharded cluster; Vitess шардує MySQL для YouTube і Slack.</p>
+
+<h3>Проблеми шардінгу, які треба знати наперед</h3>
+<ul>
+  <li><b>Cross-shard запити</b>: "топ-10 користувачів за витратами" — треба спитати кожен шард і злити результати в застосунку (scatter-gather). Повільно і складно; уникайте через денормалізацію або окрему аналітичну БД.</li>
+  <li><b>Hot shards</b>: одна знаменитість із 50 млн підписників живе на шарді 7, і шард 7 горить. Рішення: виносити "гарячі" ключі окремо, або додатково дробити їх (<code>key + random suffix</code>).</li>
+  <li><b>Resharding</b>: збільшити кількість шардів наживо — окрема інженерна задача (подвійний запис, фонове копіювання, перемикання). Плануйте більше шардів, ніж потрібно зараз (наприклад, 64 логічні шарди на 4 фізичних серверах — потім просто рознесіть).</li>
+  <li><b>Унікальність і транзакції</b>: <code>UNIQUE(email)</code> працює лише в межах шарда; глобальні id генерують окремо (UUID v7, Snowflake ID).</li>
+  <li><b>Референсні дані</b> (країни, валюти) копіюють на кожен шард.</li>
+</ul>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Обираючи ключ шардування, шукайте той, за яким 95% запитів можна виконати в межах одного шарда. Для SaaS це майже завжди <code>tenantId</code> (організація): усі дані клієнта разом, JOIN всередині клієнта працюють, ізоляція між клієнтами природна. Для соцмережі — <code>userId</code>, але стрічка друзів — це cross-shard запит, тому її будують окремо (fan-out on write у Redis). Instagram, Notion і Figma публікували детальні розповіді про свій шардінг PostgreSQL — усі три вибрали шардування за власником даних.</p>
+</div>

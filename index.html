@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fullstack для чайників — від новачка до про</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<section class="hero">
+  <h1>Fullstack для чайників 🧸→🎓</h1>
+  <p>Навчальний посібник з фулстек-розробки, написаний так, щоб зрозумів навіть п'ятирічний: побутові аналогії, схеми, код і посилання на першоджерела. Від «що таке інтернет» до «спроєктуй Instagram».</p>
+  <div class="meta">
+    <span>📖 17 розділів</span>
+    <span>🧭 3 рівні</span>
+    <span>⏱ ~20 годин читання</span>
+    <span>✅ Прочитано: <b data-done-count>0 / 17</b></span>
+  </div>
+</section>
+
+<h2>Як користуватися цим підручником</h2>
+<ol class="steps">
+  <li><b>Читайте по порядку.</b> Кожен розділ спирається на попередні. Якщо щось уже знаєте — швидко перегляньте блок «Що запам'ятати» і йдіть далі.</li>
+  <li><b>Робіть «Спробуй сам».</b> Читання без практики дає ~10 % результату. Кожен розділ має практичні кроки.</li>
+  <li><b>Відповідайте на «Перевір себе».</b> Спершу відповідайте вголос, потім розкривайте відповідь.</li>
+  <li><b>Ходіть за посиланнями.</b> Підручник — це карта. Першоджерела (MDN, документація PostgreSQL, System Design Primer) — територія.</li>
+</ol>
+
+<h2>Легенда блоків</h2>
+<div class="grid">
+  <div class="box kid" style="margin:0"><div class="title">Пояснення для п'ятирічного</div><p>Аналогія з реального життя, з якої починається кожна тема.</p></div>
+  <div class="box why" style="margin:0"><div class="title">Чому це важливо</div><p>Навіщо це знати і де воно стріляє на практиці.</p></div>
+  <div class="box try" style="margin:0"><div class="title">Спробуй сам</div><p>Практичне завдання на 10–30 хвилин.</p></div>
+  <div class="box warn" style="margin:0"><div class="title">Підводні камені</div><p>Типові помилки новачків та як їх уникнути.</p></div>
+  <div class="box pro" style="margin:0"><div class="title">Для просунутих</div><p>Глибші деталі для тих, хто хоче більше.</p></div>
+  <div class="box links" style="margin:0"><div class="title">Ресурси</div><p>Перевірені зовнішні матеріали для поглиблення.</p></div>
+</div>
+
+<h2>Карта навчання</h2>
+<figure>
+  <svg viewBox="0 0 900 300" role="img" aria-label="Карта навчання: три рівні від новачка до про">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="40" width="260" height="220" rx="16" class="green"/>
+    <text x="150" y="72" text-anchor="middle" class="bold">Рівень 1 · Новачок</text>
+    <text x="40" y="105" class="small">01 Як працює інтернет</text>
+    <text x="40" y="130" class="small">02 HTML / CSS / JS</text>
+    <text x="40" y="155" class="small">03 Термінал, Git, npm</text>
+    <text x="40" y="180" class="small">04 Сервер і REST</text>
+    <text x="40" y="205" class="small">05 SQL / PostgreSQL</text>
+    <text x="40" y="230" class="small">06 NoSQL / Redis</text>
+    <path d="M280 150 L320 150" class="arrow"/>
+    <rect x="320" y="40" width="260" height="220" rx="16" class="blue"/>
+    <text x="450" y="72" text-anchor="middle" class="bold">Рівень 2 · Середній</text>
+    <text x="340" y="105" class="small">07 Auth і безпека</text>
+    <text x="340" y="130" class="small">08 React / Next.js</text>
+    <text x="340" y="155" class="small">09 REST / GraphQL / gRPC</text>
+    <text x="340" y="180" class="small">10 Тестування</text>
+    <text x="340" y="205" class="small">11 Docker / CI/CD / хмара</text>
+    <path d="M580 150 L620 150" class="arrow"/>
+    <rect x="620" y="40" width="260" height="220" rx="16" class="purple"/>
+    <text x="750" y="72" text-anchor="middle" class="bold">Рівень 3 · Про</text>
+    <text x="640" y="105" class="small">12 Кешування</text>
+    <text x="640" y="130" class="small">13 Мікросервіси, черги</text>
+    <text x="640" y="155" class="small">14 Масштабування</text>
+    <text x="640" y="180" class="small">15 Observability</text>
+    <text x="640" y="205" class="small">16 System Design</text>
+    <text x="640" y="230" class="small">17 Roadmap і глосарій</text>
+  </svg>
+  <figcaption>Три рівні. Кожен наступний спирається на попередній.</figcaption>
+</figure>
+
+<h2>Рівень 1 · Новачок <span class="level-badge level-1">старт</span></h2>
+<p>Ви дізнаєтесь, що відбувається, коли ви натискаєте Enter в браузері, напишете першу сторінку, перший сервер і першу таблицю в базі даних.</p>
+<div class="grid">
+  <a class="card" href="chapters/01-how-internet-works.html"><div class="num">Розділ 01</div><h3>Як працює інтернет</h3><p>Клієнт і сервер, IP, DNS, HTTP, що робить браузер. Повний шлях запиту.</p><div class="time">⏱ 45 хв</div></a>
+  <a class="card" href="chapters/02-frontend-basics.html"><div class="num">Розділ 02</div><h3>Frontend: HTML, CSS, JavaScript</h3><p>Скелет, одяг і мозок сторінки. DOM, події, fetch.</p><div class="time">⏱ 90 хв</div></a>
+  <a class="card" href="chapters/03-dev-tools-git.html"><div class="num">Розділ 03</div><h3>Інструменти: термінал, Git, npm</h3><p>Як розробники розмовляють із комп'ютером і не втрачають код.</p><div class="time">⏱ 60 хв</div></a>
+  <a class="card" href="chapters/04-backend-basics.html"><div class="num">Розділ 04</div><h3>Backend: сервер, Node.js, REST</h3><p>Перший HTTP-сервер, маршрути, JSON, статуси, Express.</p><div class="time">⏱ 90 хв</div></a>
+  <a class="card" href="chapters/05-sql-databases.html"><div class="num">Розділ 05</div><h3>Бази даних: SQL і PostgreSQL</h3><p>Таблиці, зв'язки, JOIN, індекси, транзакції, ORM.</p><div class="time">⏱ 120 хв</div></a>
+  <a class="card" href="chapters/06-nosql-databases.html"><div class="num">Розділ 06</div><h3>NoSQL: MongoDB, Redis і ко</h3><p>Документи, ключ-значення, коли SQL, а коли ні.</p><div class="time">⏱ 60 хв</div></a>
+</div>
+
+<h2>Рівень 2 · Середній <span class="level-badge level-2">джун → мідл</span></h2>
+<p>Ви навчитесь робити застосунки, які можна показати людям: з логіном, сучасним фронтендом, тестами і деплоєм.</p>
+<div class="grid">
+  <a class="card" href="chapters/07-auth-security.html"><div class="num">Розділ 07</div><h3>Автентифікація та безпека</h3><p>Паролі, сесії, JWT, OAuth, OWASP Top 10.</p><div class="time">⏱ 90 хв</div></a>
+  <a class="card" href="chapters/08-frontend-frameworks.html"><div class="num">Розділ 08</div><h3>React, Next.js, стан застосунку</h3><p>Компоненти, хуки, SSR/CSR, роутинг, керування станом.</p><div class="time">⏱ 120 хв</div></a>
+  <a class="card" href="chapters/09-api-design.html"><div class="num">Розділ 09</div><h3>API: REST, GraphQL, gRPC, WebSocket</h3><p>Як проєктувати контракти, версіонувати і не ламати клієнтів.</p><div class="time">⏱ 90 хв</div></a>
+  <a class="card" href="chapters/10-testing.html"><div class="num">Розділ 10</div><h3>Тестування</h3><p>Unit, integration, e2e. Піраміда тестів, моки, TDD.</p><div class="time">⏱ 60 хв</div></a>
+  <a class="card" href="chapters/11-docker-cicd-deploy.html"><div class="num">Розділ 11</div><h3>Docker, CI/CD, хмара, деплой</h3><p>Контейнери, пайплайни, environment, перший продакшн.</p><div class="time">⏱ 90 хв</div></a>
+</div>
+
+<h2>Рівень 3 · Про <span class="level-badge level-3">мідл → сеньйор</span></h2>
+<p>Ви зрозумієте, як системи витримують мільйони користувачів і як про це говорити на співбесідах з system design.</p>
+<div class="grid">
+  <a class="card" href="chapters/12-caching-performance.html"><div class="num">Розділ 12</div><h3>Кешування та продуктивність</h3><p>HTTP-кеш, CDN, Redis, інвалідація, профілювання.</p><div class="time">⏱ 60 хв</div></a>
+  <a class="card" href="chapters/13-microservices.html"><div class="num">Розділ 13</div><h3>Мікросервіси та черги повідомлень</h3><p>Моноліт vs мікросервіси, RabbitMQ, Kafka, saga, API gateway.</p><div class="time">⏱ 120 хв</div></a>
+  <a class="card" href="chapters/14-scaling-distributed.html"><div class="num">Розділ 14</div><h3>Масштабування і розподілені системи</h3><p>Load balancer, реплікація, шардінг, CAP, консистентність.</p><div class="time">⏱ 120 хв</div></a>
+  <a class="card" href="chapters/15-observability.html"><div class="num">Розділ 15</div><h3>Логи, метрики, трейсинг</h3><p>Як бачити, що відбувається в системі, і не прокидатись о 3 ночі.</p><div class="time">⏱ 60 хв</div></a>
+  <a class="card" href="chapters/16-system-design.html"><div class="num">Розділ 16</div><h3>System Design: від задачі до схеми</h3><p>Методологія, оцінки, кейси: URL shortener, чат, стрічка, Instagram.</p><div class="time">⏱ 150 хв</div></a>
+  <a class="card" href="chapters/17-roadmap-glossary.html"><div class="num">Розділ 17</div><h3>Roadmap, ресурси, глосарій</h3><p>Що вчити далі, pet-проєкти, словник термінів.</p><div class="time">⏱ 30 хв</div></a>
+</div>
+
+<footer>Fullstack для чайників · Відкривайте файли локально, інтернет потрібен лише для зовнішніх посилань.</footer>
+</main>
+</div>
+<script src="assets/nav.js"></script>
+</body>
+</html>

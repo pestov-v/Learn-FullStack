@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>13. Мікросервіси та черги повідомлень — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 13 · <span class="level-badge level-3">Про</span></div>
+  <h1>Мікросервіси та черги повідомлень</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, коли один великий застосунок варто розрізати на кілька маленьких, як ці маленькі застосунки розмовляють між собою через черги, і чому "розрізати" — це набагато дорожче, ніж здається.</p>
+  <div class="meta"><span>⏱ ~90 хв</span><span>📚 Передумови: розділи 04, 05, 10, 12</span><span>🎯 Ціль: свідомо обирати між монолітом і мікросервісами та вміти написати надійного producer/consumer</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Моноліт проти мікросервісів: будинок і містечко</a></li>
+    <li><a href="#s2">Модульний моноліт і чесна відповідь "коли не треба"</a></li>
+    <li><a href="#s3">Як ділити: bounded context простими словами</a></li>
+    <li><a href="#s4">Синхронна комунікація: REST, gRPC, API gateway, BFF</a></li>
+    <li><a href="#s5">Асинхронна комунікація: черги і брокери</a></li>
+    <li><a href="#s6">RabbitMQ: exchange, queue, binding, ack</a></li>
+    <li><a href="#s7">Kafka: журнал, партиції, offset, consumer group</a></li>
+    <li><a href="#s8">Гарантії доставки, ідемпотентність, outbox</a></li>
+    <li><a href="#s9">Розподілені транзакції: 2PC і saga</a></li>
+    <li><a href="#s10">Event-driven, event sourcing, CQRS</a></li>
+    <li><a href="#s11">Відмовостійкість: timeout, retry, circuit breaker, bulkhead</a></li>
+    <li><a href="#s12">Контракти, спостережуваність, деплой</a></li>
+    <li><a href="#s13">Чек-лист "чи готові ви до мікросервісів"</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви велику родину, яка живе в одному великому будинку. Кухня, спальні, майстерня, гараж — усе під одним дахом. Зручно: до кухні йти два кроки, усі одразу знають, що на обід. Але якщо тато вирішив перебудувати гараж, увесь будинок у пилюці, а коли ламається електрика — темно у всіх. Це <b>моноліт (monolith)</b>.</p>
+  <p>Інший варіант — містечко з окремих будиночків: пекарня, пошта, банк, школа. Кожен може ремонтуватися окремо, кожен може зростати сам по собі. Але тепер, щоб передати листа з пекарні в банк, треба вийти на дорогу, а дорога може бути перекрита, лист може загубитися, а поштар — захворіти. Це <b>мікросервіси (microservices)</b>. А <b>черга повідомлень (message queue)</b> — це поштова скринька біля дверей: пекар кидає туди листа й іде далі працювати, а поштар забере його, коли зможе.</p>
+</div>
+
+<h2 id="s1">1. Моноліт проти мікросервісів: будинок і містечко</h2>
+<p><b>Моноліт (monolith)</b> — це один застосунок, один процес, один репозиторій, одна база даних. Ви робите <code>node server.js</code> — і працює все: користувачі, каталог, кошик, оплата, листи. Виклик функції <code>createOrder()</code> з модуля кошика — це звичайний виклик функції в тій самій пам'яті: він займає наносекунди, ніколи не "губиться" по дорозі й або виконується, або кидає виняток.</p>
+<p><b>Мікросервіси (microservices)</b> — це той самий продукт, але розрізаний на кілька окремих застосунків, кожен зі своїм процесом, своїм деплоєм і (в ідеалі) своєю базою даних. Тепер <code>createOrder()</code> — це мережевий запит: він займає мілісекунди, може не дійти, може дійти двічі, а сервіс на тому боці може бути мертвим, повільним або старої версії.</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Порівняння моноліту і мікросервісів">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="150" y="26" text-anchor="middle" class="bold">Моноліт: один будинок</text>
+    <rect x="20" y="40" width="260" height="250" rx="16" class="box-fill"/>
+    <rect x="35" y="55" width="110" height="46" rx="8" class="blue"/><text x="90" y="83" text-anchor="middle" class="small">users</text>
+    <rect x="155" y="55" width="110" height="46" rx="8" class="blue"/><text x="210" y="83" text-anchor="middle" class="small">catalog</text>
+    <rect x="35" y="111" width="110" height="46" rx="8" class="blue"/><text x="90" y="139" text-anchor="middle" class="small">orders</text>
+    <rect x="155" y="111" width="110" height="46" rx="8" class="blue"/><text x="210" y="139" text-anchor="middle" class="small">payments</text>
+    <rect x="35" y="167" width="230" height="40" rx="8" class="accent"/><text x="150" y="192" text-anchor="middle" class="small">виклики функцій у пам'яті</text>
+    <rect x="35" y="220" width="230" height="55" rx="8" class="green"/><text x="150" y="243" text-anchor="middle" class="bold small">одна база даних</text><text x="150" y="262" text-anchor="middle" class="muted">одна транзакція на все</text>
+
+    <text x="560" y="26" text-anchor="middle" class="bold">Мікросервіси: містечко</text>
+    <rect x="360" y="50" width="110" height="60" rx="10" class="blue"/><text x="415" y="75" text-anchor="middle" class="small">users</text><text x="415" y="95" text-anchor="middle" class="muted">своя БД</text>
+    <rect x="620" y="50" width="110" height="60" rx="10" class="blue"/><text x="675" y="75" text-anchor="middle" class="small">catalog</text><text x="675" y="95" text-anchor="middle" class="muted">своя БД</text>
+    <rect x="360" y="200" width="110" height="60" rx="10" class="blue"/><text x="415" y="225" text-anchor="middle" class="small">orders</text><text x="415" y="245" text-anchor="middle" class="muted">своя БД</text>
+    <rect x="620" y="200" width="110" height="60" rx="10" class="blue"/><text x="675" y="225" text-anchor="middle" class="small">payments</text><text x="675" y="245" text-anchor="middle" class="muted">своя БД</text>
+    <rect x="490" y="125" width="110" height="60" rx="10" class="purple"/><text x="545" y="150" text-anchor="middle" class="small">брокер</text><text x="545" y="170" text-anchor="middle" class="muted">черги</text>
+    <path d="M470 80 L620 80" class="arrow"/><text x="545" y="70" text-anchor="middle" class="mono">HTTP/gRPC</text>
+    <path d="M470 230 L620 230" class="arrow"/><text x="545" y="220" text-anchor="middle" class="mono">HTTP/gRPC</text>
+    <path d="M415 200 L500 185" class="arrow dashed"/>
+    <path d="M675 200 L600 185" class="arrow dashed"/>
+    <path d="M415 110 L500 125" class="arrow dashed"/>
+    <text x="545" y="300" text-anchor="middle" class="muted">кожна стрілка — мережа: може загубитися, затриматися, повторитися</text>
+  </svg>
+  <figcaption>Ліворуч усе живе в одному процесі й одній БД. Праворуч кожен сервіс — окремий будиночок, а дороги між ними — це мережа з усіма її проблемами.</figcaption>
+</figure>
+
+<p>Чому взагалі хтось хоче праву картинку? Бо в неї є реальні плюси, які проявляються на масштабі великої компанії:</p>
+<ul>
+  <li><b>Незалежний деплой.</b> Команда платежів викочує нову версію 10 разів на день, не чекаючи, поки команда каталогу допише свою фічу.</li>
+  <li><b>Незалежне масштабування.</b> Каталог читають мільйони, оплату проводять тисячі — можна тримати 50 копій каталогу і 3 копії платежів.</li>
+  <li><b>Ізоляція збоїв.</b> Якщо сервіс рекомендацій упав, магазин працює, просто без блоку "вам може сподобатися".</li>
+  <li><b>Різні технології.</b> Обробка зображень на Go, ML-рекомендації на Python, решта на Node — і ніхто нікому не заважає.</li>
+  <li><b>Межі команд.</b> Закон Конвея (Conway's law): структура системи повторює структуру організації. 8 команд по 6 людей природно хочуть 8 незалежних шматків.</li>
+</ul>
+<p>А ось мінуси, які проявляються одразу, з першого дня:</p>
+<ul>
+  <li>Кожен виклик функції став мережевим запитом: повільніше в тисячі разів і ненадійно.</li>
+  <li>Одна транзакція БД перетворилася на "розподілену транзакцію", яку ми будемо збирати з saga і компенсацій (розділ 9).</li>
+  <li>Замість одного лога — десятки; замість одного стека помилки — трасування через п'ять сервісів.</li>
+  <li>Треба інфраструктура: контейнери, оркестратор, брокер, service discovery, CI для кожного сервісу.</li>
+  <li>Тестування "всього разом" стає складним: локально треба піднімати десять контейнерів.</li>
+</ul>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Мікросервіси — це не "сучасніший" спосіб писати код, а <b>торгівля</b>: ви обмінюєте простоту одного процесу на організаційну гнучкість. Якщо у вас немає проблеми, яку ця гнучкість вирішує (багато команд, різне навантаження на частини, потреба в різних технологіях), ви заплатите повну ціну складності й нічого не отримаєте. Мартін Фаулер прямо називає це "MicroservicePremium" — надбавка, яку варто платити лише коли система вже складна.</p>
+</div>
+
+<h2 id="s2">2. Модульний моноліт і чесна відповідь "коли не треба"</h2>
+<p>Між "одним великим будинком" і "містечком" є розумна середина — <b>модульний моноліт (modular monolith)</b>. Це все ще один процес і один деплой, але код усередині суворо поділений на модулі з чіткими межами: модуль <code>orders</code> не лізе напряму в таблиці модуля <code>users</code>, а викликає його публічний інтерфейс. Це той самий будинок, але з нормальними стінами і дверима між кімнатами, а не одна велика зала з розкиданими речами.</p>
+
+<pre><code class="language-text">src/
+  modules/
+    users/
+      index.ts        // публічний API модуля: getUser(), registerUser()
+      user.repo.ts    // доступ до таблиць users_* — ТІЛЬКИ звідси
+      user.service.ts
+    catalog/
+      index.ts        // getProduct(), searchProducts()
+      ...
+    orders/
+      index.ts        // createOrder(), getOrder()
+      order.service.ts  // імпортує ТІЛЬКИ з '../users' та '../catalog', не з їхніх нутрощів
+  shared/
+    events.ts         // внутрішня шина подій: emit('order.created', ...)
+  main.ts</code></pre>
+
+<p>Головна перевага такої структури: якщо колись справді знадобиться винести <code>payments</code> в окремий сервіс, межа вже є — ви замінюєте виклик функції <code>payments.charge()</code> на HTTP-клієнт або повідомлення в чергу, і решта коду цього не помічає. А внутрішня шина подій (<code>emit('order.created')</code>) — це та сама черга, тільки в пам'яті; замінити її на RabbitMQ пізніше — це кілька десятків рядків.</p>
+
+<h3>Коли мікросервіси НЕ потрібні</h3>
+<p>Чесно: більшості стартапів і pet-проєктів вони не потрібні. Ознаки, що вам рано:</p>
+<ul>
+  <li>Команда до 10–15 інженерів. Ви всі й так сидите в одному чаті і можете домовитися про один деплой.</li>
+  <li>Ви ще шукаєте product-market fit і переписуєте домен раз на місяць. Межі між сервісами ви вгадаєте неправильно, а переносити межу між сервісами в 10 разів дорожче, ніж між модулями.</li>
+  <li>Навантаження вміщується в один сервер із запасом (а це, з сучасним залізом, десятки тисяч запитів за секунду).</li>
+  <li>У вас немає людини, яка любить і вміє інфраструктуру: Kubernetes, брокери, трасування.</li>
+</ul>
+<p>Ознаки, що час думати про поділ:</p>
+<ul>
+  <li>Кілька команд регулярно блокують деплої одна одної ("не викочуйте, у нас ще не готово").</li>
+  <li>Один компонент (обробка відео, генерація звітів) з'їдає 90% CPU і не дає масштабувати решту окремо.</li>
+  <li>Час збірки та тестів моноліту виріс до десятків хвилин і зростає.</li>
+  <li>Є частина системи з принципово іншими вимогами: PCI DSS для платежів, інша мова, інша модель даних.</li>
+</ul>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>"Розподілений моноліт".</b> Найгірший результат: ви розрізали код на 12 сервісів, але вони ділять одну БД і деплояться тільки разом. Ви отримали всі мінуси мікросервісів і жодного плюсу.</li>
+    <li><b>Нано-сервіси.</b> Сервіс на одну функцію (<code>validate-email-service</code>) — це не мікросервіс, а мережевий виклик замість імпорту. Сервіс має володіти <i>даними та бізнес-правилами</i>, а не однією функцією.</li>
+    <li><b>Ділити "по шарах".</b> Сервіс "фронтенд", сервіс "бекенд", сервіс "БД" — це не поділ за доменом, це просто три-ярусна архітектура з мережею посередині. Ділити треба за бізнес-можливостями.</li>
+  </ul>
+</div>
+
+<h2 id="s3">3. Як ділити: bounded context простими словами</h2>
+<p>Найкращий інструмент для пошуку меж — <b>обмежений контекст (bounded context)</b> з Domain-Driven Design (DDD). Ідея проста: одне й те саме слово в різних частинах бізнесу означає різні речі. "Товар" для каталогу — це назва, опис, фото і ціна. "Товар" для складу — це SKU, вага, полиця і залишок. "Товар" для замовлення — це рядок із кількістю і зафіксованою ціною на момент покупки. Це <i>три різні моделі</i>, і коли ви намагаєтеся зробити одну таблицю <code>products</code> на всіх, у вас виходить монстр на 80 колонок, де кожна команда боїться щось змінити.</p>
+<p>Bounded context — це межа, всередині якої слово має одне значення й одну модель. Саме по цих межах і треба різати сервіси. Приклад для інтернет-магазину:</p>
+
+<figure>
+  <svg viewBox="0 0 760 360" role="img" aria-label="Поділ інтернет-магазину на сервіси за bounded context">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="30" width="150" height="90" rx="12" class="blue"/>
+    <text x="95" y="58" text-anchor="middle" class="bold">Users</text>
+    <text x="95" y="78" text-anchor="middle" class="muted">акаунт, адреси,</text>
+    <text x="95" y="94" text-anchor="middle" class="muted">автентифікація</text>
+    <rect x="305" y="30" width="150" height="90" rx="12" class="blue"/>
+    <text x="380" y="58" text-anchor="middle" class="bold">Catalog</text>
+    <text x="380" y="78" text-anchor="middle" class="muted">товари, ціни,</text>
+    <text x="380" y="94" text-anchor="middle" class="muted">категорії, пошук</text>
+    <rect x="590" y="30" width="150" height="90" rx="12" class="blue"/>
+    <text x="665" y="58" text-anchor="middle" class="bold">Notifications</text>
+    <text x="665" y="78" text-anchor="middle" class="muted">email, SMS, push</text>
+    <text x="665" y="94" text-anchor="middle" class="muted">шаблони</text>
+    <rect x="160" y="220" width="150" height="90" rx="12" class="green"/>
+    <text x="235" y="248" text-anchor="middle" class="bold">Orders</text>
+    <text x="235" y="268" text-anchor="middle" class="muted">кошик, замовлення,</text>
+    <text x="235" y="284" text-anchor="middle" class="muted">статуси</text>
+    <rect x="450" y="220" width="150" height="90" rx="12" class="green"/>
+    <text x="525" y="248" text-anchor="middle" class="bold">Payments</text>
+    <text x="525" y="268" text-anchor="middle" class="muted">платежі, повернення,</text>
+    <text x="525" y="284" text-anchor="middle" class="muted">інтеграція з банком</text>
+    <path d="M235 220 L120 120" class="arrow"/><text x="150" y="175" text-anchor="middle" class="mono">userId?</text>
+    <path d="M250 220 L360 120" class="arrow"/><text x="330" y="175" text-anchor="middle" class="mono">ціна товару?</text>
+    <path d="M310 265 L450 265" class="arrow"/><text x="380" y="255" text-anchor="middle" class="mono">charge(order)</text>
+    <path d="M300 230 L600 120" class="arrow dashed"/><text x="480" y="160" text-anchor="middle" class="mono">подія order.paid</text>
+    <text x="380" y="345" text-anchor="middle" class="muted">суцільні стрілки — синхронні запити; пунктир — асинхронні події через брокер</text>
+  </svg>
+  <figcaption>П'ять контекстів магазину. Orders питає в Users і Catalog синхронно, викликає Payments, а Notifications дізнається про оплату через подію — йому не потрібна миттєва відповідь.</figcaption>
+</figure>
+
+<p>Кілька практичних правил, як знайти межі:</p>
+<ol>
+  <li><b>Слухайте мову бізнесу.</b> Якщо менеджер із маркетингу і менеджер зі складу вживають слово "замовлення" по-різному — це два контексти.</li>
+  <li><b>Шукайте, що змінюється разом.</b> Якщо будь-яка зміна в правилах доставки тягне зміну в правилах оплати — вони, ймовірно, один контекст.</li>
+  <li><b>Мінімізуйте "балакучість".</b> Якщо для показу однієї сторінки Orders має зробити 7 запитів до Catalog — межа проведена погано, або потрібен кеш/копія даних у Orders.</li>
+  <li><b>Один сервіс володіє даними.</b> Тільки Catalog пише в таблицю товарів. Усі інші або питають його, або тримають свою <i>копію</i> потрібних полів, оновлену через події.</li>
+</ol>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>У DDD є ще <b>агрегат (aggregate)</b> — група об'єктів, яку змінюють як одне ціле в одній транзакції (замовлення разом зі своїми рядками). Гарне емпіричне правило: одна транзакція — один агрегат; між агрегатами — події. Це правило природно готує моноліт до розрізання: якщо ви ніколи не робите транзакцію, яка зачіпає і <code>orders</code>, і <code>payments</code>, винести їх у різні сервіси буде безболісно. Про це — Вон Вернон, "Domain-Driven Design Distilled".</p>
+</div>
+
+<h2 id="s4">4. Синхронна комунікація: REST, gRPC, API gateway, BFF</h2>
+<p><b>Синхронна (synchronous)</b> комунікація — це коли сервіс А посилає запит сервісу Б і <i>чекає</i> на відповідь, як людина, яка стоїть біля віконця пошти. Найпоширеніші варіанти:</p>
+<ul>
+  <li><b>REST/HTTP + JSON</b> — просто, читається людиною, працює всюди. Мінус: JSON громіздкий, а контракт (які поля, які типи) живе в документації, яку забувають оновлювати.</li>
+  <li><b>gRPC</b> — бінарний протокол поверх HTTP/2 із контрактом у файлі <code>.proto</code>. З нього генерується клієнт і сервер для будь-якої мови, тому "неправильне поле" ловиться на етапі компіляції. Швидший за JSON у кілька разів. Стандарт для спілкування між сервісами всередині системи.</li>
+</ul>
+
+<pre><code class="language-protobuf">// catalog.proto — контракт сервісу каталогу
+syntax = "proto3";
+package catalog;
+
+service Catalog {
+  // Отримати товар за id — один запит, одна відповідь
+  rpc GetProduct (GetProductRequest) returns (Product);
+}
+
+message GetProductRequest { string id = 1; }
+message Product {
+  string id = 1;
+  string name = 2;
+  int64 price_cents = 3;  // ціна в копійках, щоб не мати проблем із float
+}</code></pre>
+
+<h3>Service discovery: як знайти будиночок у містечку</h3>
+<p>У моноліті "куди дзвонити" не питання — усе в одному процесі. У мікросервісах Orders має знати IP та порт Catalog, а копій Catalog може бути 20, і вони змінюються щохвилини. <b>Виявлення сервісів (service discovery)</b> вирішує це: кожен сервіс при старті реєструється в реєстрі (Consul, etcd, або вбудований DNS Kubernetes), а клієнти питають реєстр "де зараз живе catalog?". У Kubernetes це виглядає просто: ви звертаєтесь до <code>http://catalog:8080</code>, а кластерний DNS сам віддає адресу живої копії.</p>
+
+<h3>API gateway: єдиний вхід</h3>
+<p>Якщо мобільний застосунок має знати адреси всіх 15 сервісів, автентифікуватися в кожному і збирати сторінку з 6 запитів — це погано. <b>API-шлюз (API gateway)</b> — це одна "прохідна" для зовнішніх клієнтів: він приймає запит, перевіряє токен, обмежує частоту (rate limit), маршрутизує до потрібного сервісу і, за потреби, агрегує кілька відповідей в одну.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Клієнт, API gateway і сервіси">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="60" width="130" height="70" rx="12" class="accent"/>
+    <text x="85" y="90" text-anchor="middle" class="bold">Мобільний</text><text x="85" y="110" text-anchor="middle" class="muted">застосунок</text>
+    <rect x="20" y="170" width="130" height="70" rx="12" class="accent"/>
+    <text x="85" y="200" text-anchor="middle" class="bold">Браузер</text><text x="85" y="220" text-anchor="middle" class="muted">SPA</text>
+    <rect x="260" y="90" width="180" height="120" rx="14" class="purple"/>
+    <text x="350" y="120" text-anchor="middle" class="bold">API Gateway</text>
+    <text x="350" y="142" text-anchor="middle" class="small">auth · rate limit</text>
+    <text x="350" y="160" text-anchor="middle" class="small">маршрутизація</text>
+    <text x="350" y="178" text-anchor="middle" class="small">агрегація · TLS</text>
+    <path d="M150 95 L260 130" class="arrow"/>
+    <path d="M150 205 L260 170" class="arrow"/>
+    <rect x="580" y="30" width="150" height="50" rx="10" class="blue"/><text x="655" y="60" text-anchor="middle">users</text>
+    <rect x="580" y="100" width="150" height="50" rx="10" class="blue"/><text x="655" y="130" text-anchor="middle">catalog</text>
+    <rect x="580" y="170" width="150" height="50" rx="10" class="blue"/><text x="655" y="200" text-anchor="middle">orders</text>
+    <rect x="580" y="240" width="150" height="50" rx="10" class="blue"/><text x="655" y="270" text-anchor="middle">payments</text>
+    <path d="M440 120 L580 55" class="arrow"/>
+    <path d="M440 140 L580 125" class="arrow"/>
+    <path d="M440 165 L580 195" class="arrow"/>
+    <path d="M440 185 L580 265" class="arrow"/>
+    <text x="205" y="60" text-anchor="middle" class="mono">GET /api/home</text>
+    <text x="510" y="20" text-anchor="middle" class="muted">внутрішня мережа: gRPC, без публічного доступу</text>
+  </svg>
+  <figcaption>Зовнішній світ бачить один вхід. Gateway знає, що для сторінки "/home" треба зібрати дані з трьох сервісів, і ховає цю складність від клієнта.</figcaption>
+</figure>
+
+<p><b>BFF (Backend For Frontend)</b> — розвиток цієї ідеї: окремий шлюз для кожного типу клієнта. Мобільному потрібні маленькі відповіді і мало запитів (дорогий трафік), вебу — більше полів і інша структура. Замість одного універсального шлюзу, який усім незручний, роблять <code>bff-mobile</code> і <code>bff-web</code>, кожен з яких належить команді відповідного клієнта. Готові шлюзи: Kong, NGINX, Envoy, AWS API Gateway, або самописний на Fastify/Express для невеликих систем.</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені синхронних викликів</div>
+  <ul>
+    <li><b>Ланцюжки викликів.</b> Gateway → Orders → Catalog → Pricing → Discounts. Латентності додаються, а доступність множиться: якщо кожен доступний 99,9%, п'ять у ланцюжку дають 99,5% — це вже 3,6 години простою на місяць.</li>
+    <li><b>Каскадні відмови.</b> Catalog повільний → Orders чекає і тримає з'єднання → у Orders закінчуються потоки → Gateway чекає на Orders → усе стоїть. Ліки — timeout і circuit breaker (розділ 11).</li>
+    <li><b>Тимчасове зв'язування.</b> Якщо Notifications лежить, чи має падати оформлення замовлення? Ні. Значить, лист має відправлятися асинхронно.</li>
+  </ul>
+</div>
+
+<h2 id="s5">5. Асинхронна комунікація: черги і брокери</h2>
+<p><b>Асинхронна (asynchronous)</b> комунікація — це поштова скринька. <b>Відправник (producer)</b> кладе повідомлення в <b>чергу (queue)</b>, яку тримає <b>брокер (message broker)</b>, і одразу йде далі. <b>Отримувач (consumer)</b> забирає повідомлення, коли має час. Ніхто ні на кого не чекає.</p>
+
+<figure>
+  <svg viewBox="0 0 760 240" role="img" aria-label="Producer, брокер і consumer">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="80" width="150" height="80" rx="12" class="blue"/>
+    <text x="95" y="112" text-anchor="middle" class="bold">Orders</text><text x="95" y="134" text-anchor="middle" class="muted">producer</text>
+    <path d="M170 120 L250 120" class="arrow"/><text x="210" y="108" text-anchor="middle" class="mono">publish</text>
+    <rect x="250" y="60" width="260" height="120" rx="14" class="purple"/>
+    <text x="380" y="85" text-anchor="middle" class="bold">Брокер</text>
+    <rect x="270" y="100" width="40" height="30" rx="4" class="box-fill"/><text x="290" y="120" text-anchor="middle" class="mono">m1</text>
+    <rect x="315" y="100" width="40" height="30" rx="4" class="box-fill"/><text x="335" y="120" text-anchor="middle" class="mono">m2</text>
+    <rect x="360" y="100" width="40" height="30" rx="4" class="box-fill"/><text x="380" y="120" text-anchor="middle" class="mono">m3</text>
+    <rect x="405" y="100" width="40" height="30" rx="4" class="box-fill"/><text x="425" y="120" text-anchor="middle" class="mono">m4</text>
+    <text x="380" y="160" text-anchor="middle" class="muted">черга: зберігає на диску, віддає по черзі</text>
+    <path d="M510 100 L590 60" class="arrow"/><path d="M510 120 L590 120" class="arrow"/><path d="M510 140 L590 180" class="arrow"/>
+    <text x="550" y="212" text-anchor="middle" class="mono">consume + ack</text>
+    <rect x="590" y="35" width="150" height="50" rx="10" class="green"/><text x="665" y="65" text-anchor="middle" class="small">Notifications #1</text>
+    <rect x="590" y="95" width="150" height="50" rx="10" class="green"/><text x="665" y="125" text-anchor="middle" class="small">Notifications #2</text>
+    <rect x="590" y="155" width="150" height="50" rx="10" class="green"/><text x="665" y="185" text-anchor="middle" class="small">Analytics</text>
+    <text x="95" y="200" text-anchor="middle" class="muted">не чекає відповіді,</text><text x="95" y="216" text-anchor="middle" class="muted">одразу повертає 201</text>
+  </svg>
+  <figcaption>Orders опублікував подію і забув про неї. Брокер зберіг її на диску. Три consumer'и заберуть повідомлення тоді, коли будуть готові — навіть якщо це станеться через годину після падіння.</figcaption>
+</figure>
+
+<p>Навіщо це потрібно — три головні причини:</p>
+<ol>
+  <li><b>Розв'язка (decoupling).</b> Orders не знає, хто читає його події. Сьогодні це Notifications, завтра додасться Analytics, післязавтра — Fraud detection. Orders не треба змінювати.</li>
+  <li><b>Буфер (buffering).</b> У "чорну п'ятницю" замовлення йдуть по 5000 за хвилину, а сервіс генерації PDF-рахунків встигає 500. Черга приймає всі 5000 і віддає по 500; за годину після піку все розсмоктується. Без черги PDF-сервіс просто впав би.</li>
+  <li><b>Надійність (reliability).</b> Брокер записує повідомлення на диск і не видаляє, поки consumer не підтвердить обробку (<b>ack</b>). Якщо consumer упав посередині — повідомлення повернеться в чергу і його забере інша копія.</li>
+</ol>
+
+<p>Дві базові моделі роботи брокера:</p>
+<ul>
+  <li><b>Черга завдань (work queue / point-to-point)</b>: кожне повідомлення обробляє <i>рівно один</i> із consumer'ів. Так розподіляють роботу між копіями одного сервісу.</li>
+  <li><b>Публікація/підписка (publish/subscribe)</b>: кожне повідомлення отримують <i>усі</i> підписники. Так одна подія <code>order.paid</code> потрапляє і в Notifications, і в Analytics.</li>
+</ul>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Асинхронність — головний інструмент, який робить мікросервіси взагалі можливими. Без черг кожен сервіс залежить від доступності кожного іншого в момент запиту, і система стає слабшою за моноліт. З чергами сервіс, який лежить, просто накопичує роботу в буфері й дожене її, коли повернеться. Ця властивість називається <b>тимчасова розв'язка (temporal decoupling)</b>, і саме вона дає ізоляцію збоїв, яку обіцяють мікросервіси.</p>
+</div>
+
+<h2 id="s6">6. RabbitMQ: exchange, queue, binding, ack</h2>
+<p><b>RabbitMQ</b> — класичний брокер, що реалізує протокол <b>AMQP</b>. Його головна особливість — розумна маршрутизація: producer не кладе повідомлення прямо в чергу, а надсилає в <b>обмінник (exchange)</b>, який за правилами (<b>прив'язками, bindings</b>) розкладає його по чергах.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="RabbitMQ: exchange, binding, черги">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="110" width="130" height="70" rx="12" class="blue"/>
+    <text x="85" y="140" text-anchor="middle" class="bold">Producer</text><text x="85" y="160" text-anchor="middle" class="muted">Orders</text>
+    <path d="M150 145 L240 145" class="arrow"/><text x="195" y="130" text-anchor="middle" class="mono">key=order.paid</text>
+    <rect x="240" y="100" width="150" height="90" rx="14" class="purple"/>
+    <text x="315" y="130" text-anchor="middle" class="bold">Exchange</text><text x="315" y="150" text-anchor="middle" class="small">type: topic</text><text x="315" y="170" text-anchor="middle" class="mono">"orders"</text>
+    <path d="M390 120 L480 60" class="arrow"/><text x="445" y="72" text-anchor="middle" class="mono">order.*</text>
+    <path d="M390 145 L480 145" class="arrow"/><text x="435" y="135" text-anchor="middle" class="mono">order.paid</text>
+    <path d="M390 170 L480 230" class="arrow dashed"/><text x="450" y="215" text-anchor="middle" class="mono">order.cancelled</text>
+    <rect x="480" y="35" width="120" height="50" rx="8" class="accent"/><text x="540" y="65" text-anchor="middle" class="small">q: analytics</text>
+    <rect x="480" y="120" width="120" height="50" rx="8" class="accent"/><text x="540" y="150" text-anchor="middle" class="small">q: email</text>
+    <rect x="480" y="205" width="120" height="50" rx="8" class="accent"/><text x="540" y="235" text-anchor="middle" class="small">q: refunds</text>
+    <path d="M600 60 L650 60" class="arrow"/><path d="M600 145 L650 145" class="arrow"/>
+    <rect x="650" y="40" width="95" height="40" rx="8" class="green"/><text x="697" y="65" text-anchor="middle" class="small">consumer</text>
+    <rect x="650" y="125" width="95" height="40" rx="8" class="green"/><text x="697" y="150" text-anchor="middle" class="small">consumer</text>
+    <text x="380" y="280" text-anchor="middle" class="muted">binding = правило "яка черга отримує повідомлення з яким routing key"</text>
+  </svg>
+  <figcaption>Повідомлення з ключем order.paid потрапляє у дві черги: analytics (бо збігається з шаблоном order.*) та email. У refunds — не потрапляє, бо там прив'язка тільки на order.cancelled.</figcaption>
+</figure>
+
+<p>Типи exchange: <b>direct</b> (точний збіг ключа), <b>fanout</b> (усім чергам, ключ ігнорується), <b>topic</b> (шаблон із <code>*</code> і <code>#</code>), <b>headers</b> (за заголовками). Ключові поняття надійності:</p>
+<ul>
+  <li><b>Підтвердження (ack)</b>: consumer каже брокеру "обробив, видаляй". Якщо consumer помре без ack, брокер віддасть повідомлення іншому.</li>
+  <li><b>Відхилення (nack/reject)</b> з <code>requeue: false</code> — "не зміг, не повертай у чергу".</li>
+  <li><b>Черга мертвих листів (dead-letter queue, DLQ)</b>: повідомлення, які відхилили або які прострочили TTL, потрапляють у спеціальну чергу, де їх можна подивитися руками і повторити.</li>
+  <li><b>Prefetch</b>: скільки повідомлень consumer тримає "в роботі" одночасно. <code>prefetch=1</code> — чесний розподіл між копіями, <code>prefetch=100</code> — вища пропускна здатність.</li>
+  <li><b>Durable + persistent</b>: черга переживає перезапуск брокера, а повідомлення записуються на диск.</li>
+</ul>
+
+<pre><code class="language-js">// producer.mjs — публікуємо подію в RabbitMQ (бібліотека amqplib)
+import amqp from 'amqplib';
+
+const conn = await amqp.connect('amqp://localhost');
+const ch = await conn.createChannel();
+
+// exchange типу topic, durable — переживе перезапуск брокера
+await ch.assertExchange('orders', 'topic', { durable: true });
+
+const event = { orderId: 'o-123', userId: 'u-7', total: 4990, occurredAt: new Date().toISOString() };
+
+ch.publish(
+  'orders',              // exchange
+  'order.paid',          // routing key
+  Buffer.from(JSON.stringify(event)),
+  { persistent: true, messageId: 'evt-9f1c', contentType: 'application/json' } // persistent — на диск
+);
+console.log('опубліковано order.paid');
+await ch.close(); await conn.close();</code></pre>
+
+<pre><code class="language-js">// consumer.mjs — надійно обробляємо повідомлення
+import amqp from 'amqplib';
+
+const conn = await amqp.connect('amqp://localhost');
+const ch = await conn.createChannel();
+
+await ch.assertExchange('orders', 'topic', { durable: true });
+// DLQ: сюди підуть відхилені повідомлення
+await ch.assertExchange('orders.dlx', 'fanout', { durable: true });
+await ch.assertQueue('email.dead', { durable: true });
+await ch.bindQueue('email.dead', 'orders.dlx', '');
+
+// основна черга з посиланням на dead-letter exchange
+await ch.assertQueue('email', { durable: true, deadLetterExchange: 'orders.dlx' });
+await ch.bindQueue('email', 'orders', 'order.paid');
+
+await ch.prefetch(10); // не більше 10 повідомлень "у роботі" на цього consumer'а
+
+ch.consume('email', async (msg) =&gt; {
+  if (!msg) return;
+  const event = JSON.parse(msg.content.toString());
+  try {
+    await sendReceiptEmail(event);   // ваша бізнес-логіка
+    ch.ack(msg);                     // успіх — брокер видаляє повідомлення
+  } catch (err) {
+    console.error('не вдалося', err);
+    // requeue:false — не крутити в циклі, а відправити в DLQ
+    ch.nack(msg, false, false);
+  }
+});
+
+async function sendReceiptEmail(e) { /* ... */ }</code></pre>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Запусти RabbitMQ: <code>docker run -d -p 5672:5672 -p 15672:15672 rabbitmq:3-management</code>. Відкрий <code>http://localhost:15672</code> (guest/guest).</li>
+    <li>Запусти consumer, потім producer. Подивися у вкладці Queues, як повідомлення з'явилося і зникло після ack.</li>
+    <li>Зупини consumer, опублікуй 5 повідомлень — вони мають накопичитися. Запусти consumer знову: усі 5 оброблені.</li>
+    <li>Зроби так, щоб <code>sendReceiptEmail</code> кидав помилку. Перевір, що повідомлення потрапило в <code>email.dead</code>.</li>
+    <li>Запусти два consumer'и одночасно і подивися, як брокер ділить між ними повідомлення.</li>
+  </ol>
+</div>
+
+<h2 id="s7">7. Kafka: журнал, партиції, offset, consumer group</h2>
+<p><b>Apache Kafka</b> влаштована принципово інакше. Це не "черга, з якої видаляють прочитане", а <b>журнал (log)</b> — файл, у який тільки дописують у кінець. Повідомлення після прочитання <i>не видаляється</i>: воно лежить, поки не спливе термін зберігання (<b>retention</b>, наприклад 7 днів або 1 ТБ). Consumer сам пам'ятає, до якої позиції (<b>зсув, offset</b>) він дочитав.</p>
+<p>Це дає дві суперздатності: <b>повторне читання (replay)</b> — новий сервіс може прочитати всю історію подій за тиждень з нуля; і <b>багато незалежних читачів</b> — Analytics і Notifications читають той самий topic, кожен зі своїм offset, і не заважають одне одному.</p>
+
+<figure>
+  <svg viewBox="0 0 760 340" role="img" aria-label="Kafka: topic, партиції, offset, consumer group">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="330" y="24" text-anchor="middle" class="bold">topic "orders" (3 партиції)</text>
+    <rect x="130" y="40" width="400" height="200" rx="14" class="purple"/>
+    <text x="150" y="75" class="small">P0</text>
+    <rect x="180" y="55" width="36" height="30" rx="4" class="box-fill"/><text x="198" y="75" text-anchor="middle" class="mono">0</text>
+    <rect x="220" y="55" width="36" height="30" rx="4" class="box-fill"/><text x="238" y="75" text-anchor="middle" class="mono">1</text>
+    <rect x="260" y="55" width="36" height="30" rx="4" class="box-fill"/><text x="278" y="75" text-anchor="middle" class="mono">2</text>
+    <rect x="300" y="55" width="36" height="30" rx="4" class="accent"/><text x="318" y="75" text-anchor="middle" class="mono">3</text>
+    <rect x="340" y="55" width="36" height="30" rx="4" class="box-fill"/><text x="358" y="75" text-anchor="middle" class="mono">4</text>
+    <text x="150" y="140" class="small">P1</text>
+    <rect x="180" y="120" width="36" height="30" rx="4" class="box-fill"/><text x="198" y="140" text-anchor="middle" class="mono">0</text>
+    <rect x="220" y="120" width="36" height="30" rx="4" class="accent"/><text x="238" y="140" text-anchor="middle" class="mono">1</text>
+    <rect x="260" y="120" width="36" height="30" rx="4" class="box-fill"/><text x="278" y="140" text-anchor="middle" class="mono">2</text>
+    <text x="150" y="205" class="small">P2</text>
+    <rect x="180" y="185" width="36" height="30" rx="4" class="box-fill"/><text x="198" y="205" text-anchor="middle" class="mono">0</text>
+    <rect x="220" y="185" width="36" height="30" rx="4" class="box-fill"/><text x="238" y="205" text-anchor="middle" class="mono">1</text>
+    <rect x="260" y="185" width="36" height="30" rx="4" class="box-fill"/><text x="278" y="205" text-anchor="middle" class="mono">2</text>
+    <rect x="300" y="185" width="36" height="30" rx="4" class="box-fill"/><text x="318" y="205" text-anchor="middle" class="mono">3</text>
+    <rect x="340" y="185" width="36" height="30" rx="4" class="box-fill"/><text x="358" y="205" text-anchor="middle" class="mono">4</text>
+    <rect x="380" y="185" width="36" height="30" rx="4" class="accent"/><text x="398" y="205" text-anchor="middle" class="mono">5</text>
+    <text x="330" y="232" text-anchor="middle" class="muted">жовтий = поточний offset групи "email" · дописується тільки в кінець</text>
+    <rect x="20" y="110" width="80" height="60" rx="10" class="blue"/><text x="60" y="135" text-anchor="middle" class="small">producer</text><text x="60" y="155" text-anchor="middle" class="muted">key=userId</text>
+    <path d="M100 140 L130 140" class="arrow"/>
+    <rect x="580" y="45" width="160" height="110" rx="12" class="green"/>
+    <text x="660" y="68" text-anchor="middle" class="bold small">group "email"</text>
+    <text x="660" y="92" text-anchor="middle" class="small">consumer A ← P0</text>
+    <text x="660" y="112" text-anchor="middle" class="small">consumer B ← P1, P2</text>
+    <text x="660" y="140" text-anchor="middle" class="muted">партиція → 1 читач</text>
+    <rect x="580" y="175" width="160" height="60" rx="12" class="green"/>
+    <text x="660" y="198" text-anchor="middle" class="bold small">group "analytics"</text>
+    <text x="660" y="220" text-anchor="middle" class="small">consumer C ← P0,P1,P2</text>
+    <path d="M530 100 L580 100" class="arrow"/><path d="M530 205 L580 205" class="arrow"/>
+    <text x="380" y="290" text-anchor="middle" class="muted">кожна група має свій offset на кожній партиції; ключ повідомлення визначає партицію,</text>
+    <text x="380" y="310" text-anchor="middle" class="muted">тому всі події одного користувача йдуть у ту саму партицію і читаються по порядку</text>
+  </svg>
+  <figcaption>Topic поділений на партиції для паралелізму. Усередині партиції порядок гарантований. Кожна consumer group читає весь topic незалежно, ділячи партиції між своїми членами.</figcaption>
+</figure>
+
+<p>Ключові поняття:</p>
+<ul>
+  <li><b>Topic</b> — іменований потік подій (<code>orders</code>, <code>user-events</code>).</li>
+  <li><b>Партиція (partition)</b> — фізичний журнал; topic складається з N партицій, розкиданих по брокерах. Порядок гарантується <i>тільки всередині партиції</i>.</li>
+  <li><b>Ключ (key)</b> — повідомлення з однаковим ключем потрапляють в одну партицію. Ключ <code>userId</code> гарантує, що всі події одного користувача обробляться по порядку.</li>
+  <li><b>Consumer group</b> — набір читачів, які ділять між собою партиції topic'а. Максимальний паралелізм = кількість партицій.</li>
+  <li><b>Offset commit</b> — consumer періодично записує "я дочитав до 42". Якщо він упав, наступник почне з 42.</li>
+  <li><b>Replication factor</b> — кожна партиція копіюється на кілька брокерів; втрата одного брокера не втрачає даних.</li>
+</ul>
+
+<pre><code class="language-js">// kafka-producer.mjs — бібліотека kafkajs
+import { Kafka } from 'kafkajs';
+
+const kafka = new Kafka({ clientId: 'orders-service', brokers: ['localhost:9092'] });
+const producer = kafka.producer({ idempotent: true }); // брокер відкидає дублікати при retry
+await producer.connect();
+
+await producer.send({
+  topic: 'orders',
+  messages: [{
+    key: 'u-7',                                  // усі події користувача u-7 → одна партиція
+    value: JSON.stringify({ type: 'order.paid', orderId: 'o-123', total: 4990 }),
+    headers: { 'correlation-id': 'req-abc' },   // для трасування (розділ 15)
+  }],
+});
+await producer.disconnect();</code></pre>
+
+<pre><code class="language-js">// kafka-consumer.mjs
+import { Kafka } from 'kafkajs';
+
+const kafka = new Kafka({ clientId: 'email-service', brokers: ['localhost:9092'] });
+const consumer = kafka.consumer({ groupId: 'email' }); // усі копії email-сервісу — одна група
+await consumer.connect();
+await consumer.subscribe({ topic: 'orders', fromBeginning: false });
+
+await consumer.run({
+  // autoCommit за замовчуванням: offset фіксується ПІСЛЯ повернення з eachMessage
+  eachMessage: async ({ topic, partition, message }) =&gt; {
+    const event = JSON.parse(message.value.toString());
+    if (event.type !== 'order.paid') return;   // нецікаве — пропускаємо, offset усе одно рухається
+    await sendReceiptEmail(event);             // якщо кине помилку — kafkajs повторить з того ж offset
+    console.log(`P${partition} @ ${message.offset} оброблено`);
+  },
+});
+
+async function sendReceiptEmail(e) { /* ... */ }</code></pre>
+
+<h3>RabbitMQ проти Kafka</h3>
+<div class="table-wrap">
+<table>
+  <tr><th>Критерій</th><th>RabbitMQ</th><th>Kafka</th></tr>
+  <tr><td>Модель</td><td>Розумний брокер, "тупий" consumer: брокер маршрутизує і стежить за доставкою</td><td>"Тупий" брокер, розумний consumer: журнал + offset на боці читача</td></tr>
+  <tr><td>Після прочитання</td><td>Повідомлення видаляється після ack</td><td>Лишається до кінця retention; можна перечитати</td></tr>
+  <tr><td>Порядок</td><td>У межах однієї черги з одним consumer'ом</td><td>Гарантований у межах партиції</td></tr>
+  <tr><td>Маршрутизація</td><td>Гнучка: exchange, topic-шаблони, headers</td><td>Проста: topic + ключ → партиція</td></tr>
+  <tr><td>Пропускна здатність</td><td>Десятки тисяч повід./с</td><td>Мільйони повід./с на кластер</td></tr>
+  <tr><td>Пріоритети, TTL, відкладені</td><td>Вбудовано</td><td>Немає (робиться зверху)</td></tr>
+  <tr><td>Складність експлуатації</td><td>Низька: один docker-контейнер, зрозумілий UI</td><td>Вища: кластер, KRaft/ZooKeeper, партиціонування</td></tr>
+  <tr><td>Найкраще для</td><td>Черги завдань, RPC через чергу, складна маршрутизація, невеликі/середні системи</td><td>Потоки подій, event sourcing, аналітика, інтеграція багатьох сервісів, великий обсяг</td></tr>
+</table>
+</div>
+<p>Практичне правило: якщо вам потрібно "розподілити роботу між воркерами" — беріть RabbitMQ (або навіть Redis + BullMQ). Якщо потрібен "журнал усього, що сталося, який читають багато сервісів" — Kafka. Хмарні аналоги: AWS SQS/SNS (черги/pub-sub), Google Pub/Sub, Azure Service Bus; для Kafka — Amazon MSK, Confluent Cloud, Redpanda.</p>
+
+<h2 id="s8">8. Гарантії доставки, ідемпотентність, outbox</h2>
+<p>Мережа ненадійна, тому будь-яка система доставки повідомлень обирає одне з трьох:</p>
+<ul>
+  <li><b>Не більше одного разу (at-most-once)</b>: відправили і забули; ack не чекаємо. Повідомлення може загубитися, але ніколи не продублюється. Годиться для метрик і логів.</li>
+  <li><b>Не менше одного разу (at-least-once)</b>: повторюємо, поки не отримаємо ack. Повідомлення точно дійде, але <i>може дійти двічі</i>. Це стандарт для бізнес-подій, і саме тут потрібна ідемпотентність.</li>
+  <li><b>Рівно один раз (exactly-once)</b>: у загальному випадку між двома незалежними системами — неможливо (це наслідок проблеми двох генералів). Kafka пропонує "exactly-once" лише всередині свого кластера через транзакції producer'а; щойно ви пишете в зовнішню БД чи шлете email — знову at-least-once + ідемпотентність.</li>
+</ul>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Як виникає дублікат повідомлення">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="130" height="44" rx="10" class="purple"/><text x="85" y="48" text-anchor="middle" class="bold">Брокер</text>
+    <rect x="610" y="20" width="130" height="44" rx="10" class="green"/><text x="675" y="48" text-anchor="middle" class="bold">Consumer</text>
+    <path d="M85 64 L85 280" class="arrow dashed"/><path d="M675 64 L675 280" class="arrow dashed"/>
+    <path d="M85 100 L675 100" class="arrow"/><text x="380" y="90" text-anchor="middle" class="mono">m1 (deliveryTag=1)</text>
+    <rect x="560" y="115" width="230" height="1" class="muted"/>
+    <text x="675" y="135" text-anchor="middle" class="small">списав гроші ✔</text>
+    <text x="675" y="152" text-anchor="middle" class="small">записав у БД ✔</text>
+    <path d="M675 170 L85 170" class="arrow"/><text x="380" y="162" text-anchor="middle" class="mono">ack — загубився в мережі ✘</text>
+    <rect x="300" y="160" width="160" height="22" rx="4" class="red"/><text x="380" y="176" text-anchor="middle" class="small">обрив з'єднання</text>
+    <path d="M85 215 L675 215" class="arrow"/><text x="380" y="205" text-anchor="middle" class="mono">m1 знову (redelivered=true)</text>
+    <text x="675" y="245" text-anchor="middle" class="small red">списав гроші ще раз?!</text>
+    <text x="380" y="270" text-anchor="middle" class="muted">брокер чесно виконує at-least-once; захист від подвійного списання — робота consumer'а</text>
+  </svg>
+  <figcaption>Consumer усе зробив правильно, але ack не дійшов. Брокер, не знаючи про це, доставляє повідомлення ще раз. Без перевірки на дублікат гроші спишуться двічі.</figcaption>
+</figure>
+
+<h3>Ідемпотентний consumer</h3>
+<p><b>Ідемпотентність (idempotency)</b> — властивість операції, коли повторне виконання дає той самий результат, що й одне. "Встановити статус = paid" ідемпотентна; "збільшити баланс на 100" — ні. Рецепт ідемпотентного consumer'а: кожне повідомлення має унікальний <code>messageId</code>; перед обробкою перевіряємо, чи вже бачили цей id, і робимо це <i>в одній транзакції</i> з бізнес-зміною.</p>
+
+<pre><code class="language-js">// ідемпотентна обробка: таблиця processed_messages(message_id PRIMARY KEY)
+async function handlePaid(event, messageId, db) {
+  await db.transaction(async (tx) =&gt; {
+    // INSERT впаде на дублікаті PRIMARY KEY → ON CONFLICT DO NOTHING поверне 0 рядків
+    const inserted = await tx.query(
+      'INSERT INTO processed_messages(message_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING 1',
+      [messageId]
+    );
+    if (inserted.rowCount === 0) {
+      console.log('дублікат', messageId, '— пропускаємо');
+      return; // транзакція відкотиться без змін, але ack ми все одно надішлемо
+    }
+    await tx.query('UPDATE orders SET status = $1 WHERE id = $2', ['paid', event.orderId]);
+    await tx.query('INSERT INTO ledger(order_id, amount) VALUES ($1, $2)', [event.orderId, event.total]);
+  });
+}</code></pre>
+
+<h3>Outbox pattern: як не втратити подію</h3>
+<p>Є симетрична проблема на боці producer'а. Orders записує замовлення в БД, а потім публікує <code>order.created</code>. Що, як процес упаде між цими двома діями? Замовлення є, події немає, Notifications ніколи не надішле лист. Обернути обидві дії в одну транзакцію не можна — брокер не бере участі в транзакціях PostgreSQL.</p>
+<p>Розв'язання — <b>outbox pattern (шаблон "вихідна скринька")</b>: подію записуємо <i>у ту саму БД</i>, у таблицю <code>outbox</code>, у тій самій транзакції, що й замовлення. Окремий процес (relay) читає outbox і публікує в брокер, помічаючи відправлене.</p>
+
+<figure>
+  <svg viewBox="0 0 760 280" role="img" aria-label="Outbox pattern">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="90" width="140" height="70" rx="12" class="blue"/><text x="90" y="120" text-anchor="middle" class="bold">Orders</text><text x="90" y="140" text-anchor="middle" class="muted">сервіс</text>
+    <rect x="230" y="40" width="220" height="180" rx="14" class="green"/>
+    <text x="340" y="65" text-anchor="middle" class="bold">PostgreSQL Orders</text>
+    <rect x="250" y="80" width="180" height="50" rx="8" class="box-fill"/><text x="340" y="102" text-anchor="middle" class="mono">orders</text><text x="340" y="120" text-anchor="middle" class="muted">INSERT o-123</text>
+    <rect x="250" y="145" width="180" height="50" rx="8" class="accent"/><text x="340" y="167" text-anchor="middle" class="mono">outbox</text><text x="340" y="185" text-anchor="middle" class="muted">INSERT order.created</text>
+    <text x="340" y="212" text-anchor="middle" class="small bold">одна транзакція</text>
+    <path d="M160 125 L230 125" class="arrow"/><text x="195" y="112" text-anchor="middle" class="mono">BEGIN…COMMIT</text>
+    <rect x="500" y="130" width="120" height="60" rx="12" class="purple"/><text x="560" y="155" text-anchor="middle" class="bold small">Relay</text><text x="560" y="175" text-anchor="middle" class="muted">поллінг / CDC</text>
+    <path d="M430 170 L500 165" class="arrow"/><text x="465" y="190" text-anchor="middle" class="mono small">SELECT unsent</text>
+    <rect x="650" y="130" width="95" height="60" rx="12" class="purple"/><text x="697" y="165" text-anchor="middle" class="bold small">Брокер</text>
+    <path d="M620 160 L650 160" class="arrow"/>
+    <path d="M560 130 C560 60 450 60 430 100" class="arrow dashed"/><text x="520" y="70" text-anchor="middle" class="mono small">UPDATE sent_at</text>
+    <text x="380" y="260" text-anchor="middle" class="muted">якщо relay упав після publish, але до UPDATE — подія піде двічі → consumer має бути ідемпотентним</text>
+  </svg>
+  <figcaption>Подія і бізнес-дані комітяться атомарно. Relay гарантує, що подія рано чи пізно потрапить у брокер (at-least-once). Замість поллінгу можна читати WAL PostgreSQL через Debezium — це називається CDC (change data capture).</figcaption>
+</figure>
+
+<pre><code class="language-sql">-- таблиця outbox
+CREATE TABLE outbox (
+  id          uuid PRIMARY KEY,
+  aggregate   text NOT NULL,          -- 'order'
+  type        text NOT NULL,          -- 'order.created'
+  payload     jsonb NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  sent_at     timestamptz             -- NULL = ще не відправлено
+);
+CREATE INDEX ON outbox (created_at) WHERE sent_at IS NULL;</code></pre>
+
+<h3>Поворотні черги (retry queues)</h3>
+<p>Якщо обробка впала через тимчасову причину (сусідній сервіс перезавантажується), повторити варто не одразу, а через 10 с, потім 1 хв, потім 10 хв. У RabbitMQ це роблять через ланцюжок черг із TTL: <code>email.retry.10s</code> → після закінчення TTL повідомлення dead-letter'иться назад у <code>email</code>. Після N спроб — у фінальну DLQ, де на нього подивиться людина. У Kafka — окремі topic'и <code>orders.retry.1</code>, <code>orders.retry.2</code>, <code>orders.dlq</code>. Кількість спроб зберігайте в заголовку повідомлення.</p>
+
+<h2 id="s9">9. Розподілені транзакції: 2PC і saga</h2>
+<p>У моноліті "створити замовлення, списати гроші, зарезервувати товар" — це одна транзакція: або все, або нічого. У мікросервісах це три бази даних трьох сервісів. Як зробити "все або нічого"?</p>
+<p>Класична відповідь — <b>двофазний коміт (two-phase commit, 2PC)</b>: координатор питає всіх "готові?" (фаза 1), і якщо всі сказали "так" — командує "комітьте" (фаза 2). Проблеми: поки чекаємо на відповіді, усі учасники тримають блокування; якщо координатор упаде між фазами, учасники зависають у стані "готовий, але не знаю, що робити" — можливо, на години. У світі мікросервісів із HTTP та чергами 2PC майже не використовують: він убиває доступність і масштабованість.</p>
+
+<h3>Saga: довга транзакція з компенсаціями</h3>
+<p><b>Saga (сага)</b> — послідовність локальних транзакцій, кожна у своєму сервісі. Якщо крок N провалився, виконуються <b>компенсуючі дії (compensating actions)</b> для кроків N-1…1: не "відкат", а нова дія, яка скасовує ефект (повернути гроші, зняти резерв). Це не "все або нічого" в один момент, а "рано чи пізно або все зроблено, або все скасовано". Є два способи керувати сагою.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Saga: хореографія">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="380" y="24" text-anchor="middle" class="bold">Хореографія: кожен реагує на події сусіда, диригента немає</text>
+    <rect x="20" y="60" width="140" height="70" rx="12" class="blue"/><text x="90" y="90" text-anchor="middle" class="bold">Orders</text><text x="90" y="110" text-anchor="middle" class="muted">створити (pending)</text>
+    <rect x="310" y="60" width="140" height="70" rx="12" class="blue"/><text x="380" y="90" text-anchor="middle" class="bold">Payments</text><text x="380" y="110" text-anchor="middle" class="muted">списати гроші</text>
+    <rect x="600" y="60" width="140" height="70" rx="12" class="blue"/><text x="670" y="90" text-anchor="middle" class="bold">Inventory</text><text x="670" y="110" text-anchor="middle" class="muted">зарезервувати</text>
+    <path d="M160 95 L310 95" class="arrow"/><text x="235" y="85" text-anchor="middle" class="mono">order.created</text>
+    <path d="M450 95 L600 95" class="arrow"/><text x="525" y="85" text-anchor="middle" class="mono">payment.done</text>
+    <rect x="600" y="180" width="140" height="60" rx="12" class="red"/><text x="670" y="205" text-anchor="middle" class="small">товару немає ✘</text><text x="670" y="225" text-anchor="middle" class="mono">stock.failed</text>
+    <path d="M670 130 L670 180" class="arrow"/>
+    <path d="M600 210 L450 210" class="arrow dashed"/><text x="525" y="200" text-anchor="middle" class="mono">компенсація</text>
+    <rect x="310" y="180" width="140" height="60" rx="12" class="accent"/><text x="380" y="205" text-anchor="middle" class="small">повернути гроші</text><text x="380" y="225" text-anchor="middle" class="mono">payment.refunded</text>
+    <path d="M310 210 L160 210" class="arrow dashed"/>
+    <rect x="20" y="180" width="140" height="60" rx="12" class="accent"/><text x="90" y="205" text-anchor="middle" class="small">статус = cancelled</text><text x="90" y="225" text-anchor="middle" class="mono">order.cancelled</text>
+    <text x="380" y="275" text-anchor="middle" class="muted">просто для 3 кроків; для 8 кроків ніхто не розуміє, хто на що реагує</text>
+  </svg>
+  <figcaption>Хореографія: сервіси публікують події, сусіди підписуються. Провал на третьому кроці запускає ланцюжок компенсацій у зворотному порядку.</figcaption>
+</figure>
+
+<figure>
+  <svg viewBox="0 0 760 320" role="img" aria-label="Saga: оркестрація">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="380" y="24" text-anchor="middle" class="bold">Оркестрація: один диригент командує і знає стан саги</text>
+    <rect x="280" y="50" width="200" height="90" rx="14" class="purple"/>
+    <text x="380" y="80" text-anchor="middle" class="bold">Order Saga</text><text x="380" y="100" text-anchor="middle" class="small">оркестратор</text><text x="380" y="120" text-anchor="middle" class="mono small">state: RESERVING</text>
+    <rect x="20" y="220" width="140" height="60" rx="12" class="blue"/><text x="90" y="245" text-anchor="middle" class="bold">Orders</text><text x="90" y="265" text-anchor="middle" class="muted">create / cancel</text>
+    <rect x="310" y="220" width="140" height="60" rx="12" class="blue"/><text x="380" y="245" text-anchor="middle" class="bold">Payments</text><text x="380" y="265" text-anchor="middle" class="muted">charge / refund</text>
+    <rect x="600" y="220" width="140" height="60" rx="12" class="blue"/><text x="670" y="245" text-anchor="middle" class="bold">Inventory</text><text x="670" y="265" text-anchor="middle" class="muted">reserve / release</text>
+    <path d="M300 140 L110 220" class="arrow"/><text x="170" y="170" text-anchor="middle" class="mono">1. create</text>
+    <path d="M380 140 L380 220" class="arrow"/><text x="410" y="185" text-anchor="start" class="mono">2. charge</text>
+    <path d="M460 140 L650 220" class="arrow"/><text x="590" y="170" text-anchor="middle" class="mono">3. reserve</text>
+    <path d="M690 220 L480 130" class="arrow dashed"/><text x="640" y="140" text-anchor="middle" class="mono small red">3. failed</text>
+    <path d="M350 220 L350 140" class="arrow dashed"/><text x="300" y="185" text-anchor="end" class="mono small">4. refund</text>
+    <text x="380" y="305" text-anchor="middle" class="muted">оркестратор веде журнал кроків; після рестарту продовжує з того місця, де зупинився</text>
+  </svg>
+  <figcaption>Оркестрація: окремий компонент (часто окремий сервіс або state machine у Orders) викликає учасників по черзі й сам запускає компенсації. Логіка саги в одному місці, її легко читати й тестувати.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <tr><th></th><th>Хореографія</th><th>Оркестрація</th></tr>
+  <tr><td>Зв'язаність</td><td>Слабка: ніхто нікого не знає</td><td>Оркестратор знає всіх учасників</td></tr>
+  <tr><td>Зрозумілість</td><td>Погана на 5+ кроках: "хто на що реагує?"</td><td>Добра: сага — це один клас/файл</td></tr>
+  <tr><td>Ризик</td><td>Циклічні залежності між подіями</td><td>Оркестратор стає "розумним", учасники — анемічними</td></tr>
+  <tr><td>Коли брати</td><td>2–4 кроки, прості потоки</td><td>Складні, довгі, з умовами і таймаутами</td></tr>
+</table>
+</div>
+<p>Готові інструменти для оркестрації: Temporal, AWS Step Functions, Camunda; у Node — <code>@temporalio/sdk</code>. Вони зберігають стан саги, повторюють кроки, ведуть таймери ("якщо через 15 хв оплата не прийшла — скасувати").</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені saga</div>
+  <ul>
+    <li><b>Компенсація — не відкат.</b> Лист "ваше замовлення оформлено" вже пішов; відкликати неможливо, можна лише надіслати "вибачте, скасовано". Плануйте саги так, щоб необоротні дії (email, доставка) були останніми кроками.</li>
+    <li><b>Ізоляції немає.</b> Поки сага йде, інші бачать проміжний стан (замовлення pending, гроші списані). Використовуйте семантичні статуси (<code>pending</code>, <code>confirmed</code>) і не показуйте pending як успіх.</li>
+    <li><b>Компенсації теж можуть провалитися.</b> Refund через банк не пройшов. Потрібні retry і, у крайньому разі, ручна черга для операторів.</li>
+  </ul>
+</div>
+
+<h2 id="s10">10. Event-driven, event sourcing, CQRS</h2>
+<p><b>Подієво-орієнтована архітектура (event-driven architecture, EDA)</b> — це коли сервіси спілкуються переважно через події про факти, що вже сталися (<code>order.paid</code>), а не через команди ("надішли лист"). Різниця тонка, але важлива: команда знає, кому вона адресована; подія — ні. Producer події не знає, скільки в нього підписників, і це дає розв'язку.</p>
+<p><b>Event sourcing (джерело подій)</b> робить наступний крок: замість зберігати <i>поточний стан</i> (рядок <code>orders</code> зі статусом paid), зберігаємо <i>всю послідовність подій</i>, які до нього привели (<code>OrderCreated</code>, <code>ItemAdded</code>, <code>ItemAdded</code>, <code>OrderPaid</code>). Поточний стан — це результат "програвання" всіх подій. Як банківська виписка: баланс не зберігається, він обчислюється з усіх транзакцій.</p>
+<p><b>CQRS (Command Query Responsibility Segregation)</b> — розділення моделі для запису (commands) і моделі для читання (queries). Запис іде в журнал подій, а з подій будуються зручні для читання "проєкції" — денормалізовані таблиці або документи, оптимізовані під конкретні екрани.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Event sourcing і CQRS">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="40" width="120" height="60" rx="12" class="accent"/><text x="80" y="65" text-anchor="middle" class="bold small">Команда</text><text x="80" y="85" text-anchor="middle" class="mono small">PayOrder</text>
+    <path d="M140 70 L210 70" class="arrow"/>
+    <rect x="210" y="30" width="150" height="80" rx="12" class="blue"/><text x="285" y="58" text-anchor="middle" class="bold">Write-модель</text><text x="285" y="78" text-anchor="middle" class="muted">агрегат Order</text><text x="285" y="96" text-anchor="middle" class="muted">перевіряє правила</text>
+    <path d="M360 70 L430 70" class="arrow"/><text x="395" y="58" text-anchor="middle" class="mono small">append</text>
+    <rect x="430" y="20" width="310" height="100" rx="12" class="purple"/>
+    <text x="585" y="45" text-anchor="middle" class="bold">Event store (журнал)</text>
+    <rect x="445" y="60" width="90" height="40" rx="6" class="box-fill"/><text x="490" y="85" text-anchor="middle" class="mono small">Created</text>
+    <rect x="540" y="60" width="90" height="40" rx="6" class="box-fill"/><text x="585" y="85" text-anchor="middle" class="mono small">ItemAdded</text>
+    <rect x="635" y="60" width="90" height="40" rx="6" class="box-fill"/><text x="680" y="85" text-anchor="middle" class="mono small">Paid</text>
+    <path d="M585 120 L585 175" class="arrow"/><text x="640" y="150" text-anchor="middle" class="mono small">проєктори</text>
+    <rect x="380" y="175" width="180" height="60" rx="10" class="green"/><text x="470" y="200" text-anchor="middle" class="bold small">Read-модель 1</text><text x="470" y="220" text-anchor="middle" class="muted">"мої замовлення" (SQL)</text>
+    <rect x="580" y="175" width="160" height="60" rx="10" class="green"/><text x="660" y="200" text-anchor="middle" class="bold small">Read-модель 2</text><text x="660" y="220" text-anchor="middle" class="muted">пошук (Elastic)</text>
+    <rect x="20" y="175" width="120" height="60" rx="12" class="accent"/><text x="80" y="200" text-anchor="middle" class="bold small">Запит</text><text x="80" y="220" text-anchor="middle" class="mono small">GET /orders</text>
+    <path d="M380 205 L140 205" class="arrow"/>
+    <text x="380" y="275" text-anchor="middle" class="muted">read-моделі оновлюються з невеликою затримкою → eventual consistency</text>
+  </svg>
+  <figcaption>Команди змінюють стан лише через додавання подій у журнал. Проєктори читають журнал і будують окремі read-моделі під кожен сценарій читання. Читання і запис масштабуються незалежно.</figcaption>
+</figure>
+
+<p>Плюси event sourcing: повний аудит "чому баланс такий", можливість перебудувати будь-яку проєкцію з нуля, природна інтеграція з Kafka. Мінуси: складність (версіонування подій, snapshot'и для довгих історій), незвична модель для команди, eventual consistency між записом і читанням ("я натиснув "оплатити", оновив сторінку — а статус ще старий"). Використовуйте точково: для платежів, бухгалтерії, складу — там, де історія і аудит важливі. Для CRUD-довідника категорій це overkill.</p>
+
+<h3>Database per service і проблема join'ів</h3>
+<p>Принцип <b>"база даних на сервіс" (database per service)</b> означає: сервіс володіє своєю схемою, і ніхто інший не читає його таблиці напряму. Інакше зміна колонки в Users ламає Orders, і ви знову маєте розподілений моноліт. Ціна принципу — <b>ніяких JOIN між сервісами</b>. "Покажи замовлення з іменами покупців" тепер не один SQL, а варіанти:</p>
+<ol>
+  <li><b>API composition</b>: gateway або BFF бере список замовлень, збирає userId, робить один batch-запит до Users (<code>GET /users?ids=1,2,3</code>) і склеює в пам'яті. Просто, але повільно на великих обсягах.</li>
+  <li><b>Реплікація даних через події</b>: Orders підписаний на <code>user.updated</code> і тримає у своїй БД маленьку таблицю <code>customers(id, name, email)</code> — копію тільки потрібних полів. JOIN стає локальним. Ціна — eventual consistency і подвійне зберігання.</li>
+  <li><b>CQRS read-модель</b>: окремий сервіс-проєктор будує денормалізовану таблицю "замовлення з покупцем" з подій обох сервісів.</li>
+</ol>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Питання "де мої JOIN'и?" — найчастіша причина, чому команди відкочують мікросервіси назад у моноліт. Якщо ваші екрани постійно потребують даних із 4–5 контекстів одночасно, це сигнал: або межі проведені не там, або вам потрібен моноліт з модулями, а не мережа сервісів. Перш ніж різати, намалюйте 10 найважливіших екранів і для кожного випишіть, з яких сервісів потрібні дані.</p>
+</div>
+
+<h2 id="s11">11. Відмовостійкість: timeout, retry, circuit breaker, bulkhead</h2>
+<p>У розподіленій системі відмова — не виняток, а норма: у будь-який момент часу хтось із сотні контейнерів перезапускається. Мета — щоб відмова одного не тягла всіх. Чотири базових інструменти:</p>
+
+<h3>Timeout</h3>
+<p>Кожен мережевий виклик <b>мусить</b> мати таймаут. Без нього повільний сусід тримає ваші з'єднання нескінченно. Правило: таймаут клієнта коротший за таймаут того, хто викликає вас (інакше ви відповісте, коли вас уже ніхто не слухає).</p>
+
+<h3>Retry з backoff і jitter</h3>
+<p>Тимчасова помилка (503, обрив з'єднання) варта повтору. Але повторювати одразу і всім разом — це DDoS на сервіс, який і так ледь дихає. Тому: <b>експоненційна затримка (exponential backoff)</b> — 100 мс, 200, 400, 800 — плюс <b>випадковий розкид (jitter)</b>, щоб тисяча клієнтів не вдарила одночасно на 800-й мілісекунді. І повторюйте <i>тільки ідемпотентні</i> операції: повторний POST "створити платіж" без idempotency key — це подвійне списання.</p>
+
+<pre><code class="language-js">// retry з експоненційним backoff і full jitter (рецепт із AWS Builders' Library)
+async function withRetry(fn, { attempts = 4, baseMs = 100, maxMs = 5000 } = {}) {
+  let lastErr;
+  for (let i = 0; i &lt; attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryable(err)) throw err;              // 400/404 повторювати безглуздо
+      const cap = Math.min(maxMs, baseMs * 2 ** i);   // 100, 200, 400, 800…
+      const delay = Math.random() * cap;              // full jitter: випадково від 0 до cap
+      await new Promise((r) =&gt; setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+const isRetryable = (e) =&gt; e.code === 'ECONNRESET' || e.status === 503 || e.status === 429;
+
+// виклик з таймаутом через AbortSignal (Node 20+)
+const product = await withRetry(() =&gt;
+  fetch('http://catalog:8080/products/42', { signal: AbortSignal.timeout(800) }).then((r) =&gt; {
+    if (!r.ok) throw Object.assign(new Error('bad status'), { status: r.status });
+    return r.json();
+  })
+);</code></pre>
+
+<h3>Circuit breaker</h3>
+<p><b>Запобіжник (circuit breaker)</b> — як автомат у щитку: коли сусід відмовляє надто часто, ми перестаємо його викликати взагалі й одразу повертаємо помилку (або запасну відповідь), даючи йому час відновитися і не витрачаючи свої ресурси на очікування.</p>
+
+<figure>
+  <svg viewBox="0 0 760 260" role="img" aria-label="Стани circuit breaker">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="30" y="80" width="170" height="90" rx="45" class="green"/>
+    <text x="115" y="118" text-anchor="middle" class="bold">CLOSED</text><text x="115" y="140" text-anchor="middle" class="muted">запити йдуть,</text><text x="115" y="156" text-anchor="middle" class="muted">рахуємо помилки</text>
+    <rect x="295" y="80" width="170" height="90" rx="45" class="red"/>
+    <text x="380" y="118" text-anchor="middle" class="bold">OPEN</text><text x="380" y="140" text-anchor="middle" class="muted">одразу помилка,</text><text x="380" y="156" text-anchor="middle" class="muted">без виклику</text>
+    <rect x="560" y="80" width="170" height="90" rx="45" class="accent"/>
+    <text x="645" y="118" text-anchor="middle" class="bold">HALF-OPEN</text><text x="645" y="140" text-anchor="middle" class="muted">пропускаємо</text><text x="645" y="156" text-anchor="middle" class="muted">1 пробний запит</text>
+    <path d="M200 110 L295 110" class="arrow"/><text x="247" y="98" text-anchor="middle" class="small">&gt; 50% помилок за 10 с</text>
+    <path d="M465 110 L560 110" class="arrow"/><text x="512" y="98" text-anchor="middle" class="small">минуло 30 с</text>
+    <path d="M645 170 C645 230 380 230 380 170" class="arrow"/><text x="512" y="222" text-anchor="middle" class="small">проба провалилась</text>
+    <path d="M560 150 C450 60 250 40 130 80" class="arrow"/><text x="340" y="40" text-anchor="middle" class="small">проба успішна → знову CLOSED</text>
+  </svg>
+  <figcaption>Три стани запобіжника. У OPEN ми не чекаємо на таймаут — відповідаємо миттєво. Через паузу пробуємо один запит; успіх повертає в CLOSED.</figcaption>
+</figure>
+
+<pre><code class="language-js">// мінімальний circuit breaker; у продакшені — бібліотека opossum
+class CircuitBreaker {
+  constructor(fn, { failureThreshold = 5, resetMs = 30_000 } = {}) {
+    Object.assign(this, { fn, failureThreshold, resetMs, state: 'CLOSED', failures: 0, openedAt: 0 });
+  }
+  async call(...args) {
+    if (this.state === 'OPEN') {
+      if (Date.now() - this.openedAt &lt; this.resetMs) throw new Error('circuit open'); // швидка відмова
+      this.state = 'HALF_OPEN';                                                        // час спробувати
+    }
+    try {
+      const res = await this.fn(...args);
+      this.failures = 0; this.state = 'CLOSED';   // успіх — усе добре
+      return res;
+    } catch (err) {
+      this.failures++;
+      if (this.state === 'HALF_OPEN' || this.failures &gt;= this.failureThreshold) {
+        this.state = 'OPEN'; this.openedAt = Date.now();
+      }
+      throw err;
+    }
+  }
+}
+const getProduct = new CircuitBreaker((id) =&gt; fetchProduct(id));
+// у місці виклику — fallback: показати товар без рекомендацій, а не 500
+const recs = await recommendations.call(userId).catch(() =&gt; []);</code></pre>
+
+<h3>Bulkhead</h3>
+<p><b>Перегородка (bulkhead)</b> — як водонепроникні відсіки корабля: пробоїна в одному не топить судно. У коді це окремі пули з'єднань/потоків для різних залежностей: 20 з'єднань для Catalog, 10 для Payments. Якщо Catalog завис і з'їв свої 20, Payments продовжує працювати на своїх 10. У Kubernetes — окремі pod'и для критичних і некритичних endpoint'ів.</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Не реалізовуйте все це руками в кожному сервісі. <b>Service mesh</b> (Istio, Linkerd) додає до кожного pod'а sidecar-проксі (Envoy), який робить timeout, retry, circuit breaking, mTLS і збір метрик <i>прозоро для коду</i> — політики описуються в YAML. Ціна — ще один шар інфраструктури й латентність ~1 мс на хоп. Для 5 сервісів це надлишок; для 50 — порятунок.</p>
+</div>
+
+<h2 id="s12">12. Контракти, спостережуваність, деплой</h2>
+<h3>Контракти і версіонування подій</h3>
+<p>Подія — це публічний API: її формат читають інші команди, і змінити поле "просто так" означає зламати їх. Правила:</p>
+<ul>
+  <li>Зміни мають бути <b>зворотно сумісними</b>: додавати поля можна, видаляти чи перейменовувати — ні. Consumer має ігнорувати невідомі поля.</li>
+  <li>Кожна подія має <code>type</code>, <code>version</code>, <code>id</code>, <code>occurredAt</code> і <code>correlationId</code>. Ламаюча зміна = новий <code>version</code> (або новий topic <code>orders.v2</code>), і якийсь час producer шле обидві.</li>
+  <li><b>Schema registry (реєстр схем)</b> — сервіс, який зберігає схеми (Avro, Protobuf, JSON Schema) для кожного topic'а і відкидає повідомлення, що їм не відповідають. Confluent Schema Registry для Kafka перевіряє сумісність при реєстрації нової версії. Для REST аналог — OpenAPI + contract tests (Pact).</li>
+</ul>
+
+<pre><code class="language-json">{
+  "id": "evt-9f1c2a",
+  "type": "order.paid",
+  "version": 2,
+  "occurredAt": "2026-09-09T10:15:00Z",
+  "correlationId": "req-7ab3",
+  "producer": "orders-service@1.14.0",
+  "data": { "orderId": "o-123", "userId": "u-7", "totalCents": 4990, "currency": "UAH" }
+}</code></pre>
+
+<h3>Спостережуваність між сервісами</h3>
+<p>Один запит користувача тепер проходить через 6 сервісів і 2 черги. Щоб зрозуміти, де він застряг, потрібен <b>correlation id (ідентифікатор кореляції)</b> — унікальний id, який генерується на gateway і передається далі в HTTP-заголовку (<code>traceparent</code> за стандартом W3C Trace Context) та в заголовках повідомлень. Кожен лог кожного сервісу містить цей id — і ви можете зібрати всю історію запиту одним пошуком. Розподілене трасування (OpenTelemetry + Jaeger/Tempo) робить це автоматично й малює водоспад викликів. Детально — у розділі 15.</p>
+
+<h3>Деплой</h3>
+<p>Кожен сервіс — це контейнер (Docker) зі своїм Dockerfile і CI. Оркестратор (Kubernetes або простіші Nomad/ECS) відповідає за розміщення контейнерів на серверах, перезапуск упалих, масштабування копій, service discovery через DNS і rolling-оновлення без простою. Service mesh (Istio/Linkerd) додає зверху мережеві політики й безпеку. Мінімум для старту: Docker Compose локально, керований Kubernetes у хмарі, керований брокер (Amazon MQ / MSK / Confluent), щоб не адмініструвати RabbitMQ і Kafka самому.</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Візьми свій моноліт з розділу 12 (або будь-який Express/Fastify застосунок) і винеси відправку email в окремий процес через RabbitMQ: API публікує <code>user.registered</code>, воркер надсилає лист.</li>
+    <li>Додай таблицю <code>processed_messages</code> і зроби воркер ідемпотентним. Опублікуй одну подію двічі з тим самим <code>messageId</code> — лист має піти один раз.</li>
+    <li>Реалізуй outbox: подію записуй у тій самій транзакції, що й користувача; окремий скрипт-relay раз на секунду публікує невідправлені.</li>
+    <li>Убий воркер посеред обробки (<code>kill -9</code>) і переконайся, що повідомлення повернулося в чергу.</li>
+    <li>Оберни виклик до зовнішнього API запобіжником (<code>npm i opossum</code>) і подивися в логах, як він відкривається, коли ти вимикаєш мережу.</li>
+  </ol>
+</div>
+
+<h2 id="s13">13. Чек-лист "чи готові ви до мікросервісів"</h2>
+<p>Мартін Фаулер описав "MicroservicePrerequisites" — те, що має бути <i>до</i> того, як ви ріжете моноліт. Пройдіться чесно:</p>
+<ul class="checklist">
+  <li>Ми вміємо розгортати будь-який сервіс за хвилини однією командою (CI/CD, контейнери).</li>
+  <li>У нас є централізовані логи з correlation id і базовий моніторинг (метрики, алерти).</li>
+  <li>Команда розуміє й практикує DDD-межі: у моноліті вже є модулі з чіткими інтерфейсами.</li>
+  <li>Ми не робимо транзакцій, що зачіпають кілька майбутніх сервісів, або готові до saga.</li>
+  <li>Є хтось, хто відповідає за інфраструктуру (Kubernetes, брокер, мережа) як за основну роботу.</li>
+  <li>У нас більше однієї команди, і вони справді заважають одна одній у деплоях.</li>
+  <li>Ми знаємо, який саме компонент і чому потрібно масштабувати або ізолювати першим.</li>
+  <li>Ми готові до того, що перший рік система буде <i>повільнішою й дорожчою</i>, ніж моноліт.</li>
+</ul>
+<p>Якщо хоча б три пункти — "ні", правильна відповідь: модульний моноліт з чергами всередині. Це не "тимчасове рішення", а повноцінна архітектура, на якій живуть дуже великі продукти (Shopify, Basecamp, Stack Overflow).</p>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим "розподілений моноліт" відрізняється від мікросервісів і чому це найгірший варіант?</summary><p>Розподілений моноліт — це код, розрізаний на сервіси, які ділять спільну БД і мусять деплоїтися разом. Він має всі мінуси мережі (латентність, часткові відмови, складне трасування) і жодного плюсу мікросервісів (незалежний деплой, масштабування, ізоляція).</p></details>
+  <details><summary>2. Що таке bounded context і як він допомагає провести межу сервісу?</summary><p>Це межа, всередині якої термін має одне значення й одну модель. "Товар" у каталозі, на складі та в замовленні — три різні моделі. Різати сервіси треба по цих межах, щоб кожен володів своєю моделлю і даними.</p></details>
+  <details><summary>3. Навіщо потрібен API gateway і що таке BFF?</summary><p>Gateway — єдиний вхід для зовнішніх клієнтів: auth, rate limiting, маршрутизація, агрегація. BFF — окремий gateway під кожен тип клієнта (mobile, web), який належить команді цього клієнта і віддає дані в зручній саме йому формі.</p></details>
+  <details><summary>4. У чому принципова різниця між RabbitMQ і Kafka?</summary><p>RabbitMQ — розумний брокер з маршрутизацією через exchange/binding, повідомлення видаляється після ack. Kafka — журнал, що тільки дописується: повідомлення лишаються до кінця retention, consumer сам тримає offset, можливий replay і багато незалежних consumer group.</p></details>
+  <details><summary>5. Чому "exactly-once" між двома незалежними системами неможливий, і що робити замість цього?</summary><p>Ack може загубитися після успішної обробки, і відправник не відрізнить "не обробив" від "обробив, але не підтвердив". Тому робимо at-least-once і ідемпотентний consumer: перевіряємо messageId у таблиці processed_messages в одній транзакції з бізнес-зміною.</p></details>
+  <details><summary>6. Яку проблему вирішує outbox pattern?</summary><p>Процес може впасти між COMMIT у БД і publish у брокер — подія втратиться. Outbox записує подію в таблицю тієї самої БД у тій самій транзакції; окремий relay публікує її пізніше. Гарантія — at-least-once.</p></details>
+  <details><summary>7. Хореографія чи оркестрація саги для процесу з 8 кроками й умовами?</summary><p>Оркестрація: логіка в одному місці, зрозумілий стан, легко додати таймаути і умови. Хореографія на 8 кроках перетворюється на клубок подій, де ніхто не розуміє повний потік.</p></details>
+  <details><summary>8. Чому retry без jitter небезпечний?</summary><p>Тисяча клієнтів, що отримали помилку одночасно, повторять запит теж одночасно (через 100, 200, 400 мс) і знову покладуть сервіс. Випадковий розкид розмазує повтори в часі.</p></details>
+  <details><summary>9. Що робить circuit breaker у стані OPEN і навіщо half-open?</summary><p>У OPEN він не викликає залежність узагалі — миттєво повертає помилку/fallback, економлячи ресурси і даючи сусіду відновитися. Half-open пропускає один пробний запит, щоб перевірити, чи можна повертатися в CLOSED.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>Мікросервіси — це організаційне рішення з технічною ціною; більшості проєктів достатньо модульного моноліту.</li>
+  <li>Ділити треба за bounded context (бізнес-можливостями), а не за шарами чи функціями.</li>
+  <li>Кожен сервіс володіє своїми даними; JOIN між сервісами замінюють API composition, реплікація через події або CQRS.</li>
+  <li>Синхронні виклики (REST/gRPC) — для запитів, що потребують відповіді зараз; асинхронні (черги) — для всього, що може почекати.</li>
+  <li>Черга дає буфер, розв'язку і надійність; RabbitMQ — для маршрутизації та задач, Kafka — для журналів подій і replay.</li>
+  <li>Реальна гарантія — at-least-once; тому consumer має бути ідемпотентним, а producer — використовувати outbox.</li>
+  <li>2PC у мікросервісах не використовують; замість нього — saga з компенсуючими діями, краще оркестрована.</li>
+  <li>Кожен мережевий виклик має timeout; retry — з експоненційним backoff і jitter, лише для ідемпотентних операцій.</li>
+  <li>Circuit breaker і bulkhead зупиняють каскадні відмови.</li>
+  <li>Події — публічний контракт: додавати поля можна, ламати — тільки через нову версію; schema registry це контролює.</li>
+  <li>Correlation id у кожному запиті і повідомленні — без нього налагодити розподілену систему неможливо.</li>
+  <li>Перед поділом перевірте MicroservicePrerequisites: деплой, моніторинг, DDD-межі, команда інфраструктури.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://martinfowler.com/articles/microservices.html" target="_blank" rel="noopener">Martin Fowler, James Lewis — Microservices</a> — канонічна стаття, що визначила термін; характеристики стилю і його ціна.</li>
+    <li><a href="https://martinfowler.com/bliki/MonolithFirst.html" target="_blank" rel="noopener">Martin Fowler — MonolithFirst</a> — аргументи, чому починати треба з моноліту, з досвіду реальних проєктів.</li>
+    <li><a href="https://martinfowler.com/bliki/MicroservicePrerequisites.html" target="_blank" rel="noopener">Martin Fowler — MicroservicePrerequisites</a> — що має бути готове до поділу; основа нашого чек-листа.</li>
+    <li><a href="https://microservices.io/patterns/index.html" target="_blank" rel="noopener">microservices.io — каталог патернів (Chris Richardson)</a> — Saga, Transactional outbox, API gateway, CQRS, Database per service з прикладами; довідник, до якого повертаються роками.</li>
+    <li><a href="https://microservices.io/patterns/data/saga.html" target="_blank" rel="noopener">microservices.io — Saga pattern</a> — хореографія vs оркестрація з прикладом замовлення, як у цьому розділі.</li>
+    <li><a href="https://microservices.io/patterns/data/transactional-outbox.html" target="_blank" rel="noopener">microservices.io — Transactional outbox</a> — детальний опис outbox і варіантів relay (polling vs transaction log tailing).</li>
+    <li><a href="https://samnewman.io/books/building_microservices_2nd_edition/" target="_blank" rel="noopener">Sam Newman — Building Microservices, 2nd ed.</a> — найповніша книга про мікросервіси: від моделювання до деплою і організації команд.</li>
+    <li><a href="https://www.rabbitmq.com/tutorials" target="_blank" rel="noopener">RabbitMQ Tutorials</a> — офіційні покрокові туторіали (work queues, pub/sub, routing, topics) з кодом на JavaScript.</li>
+    <li><a href="https://www.rabbitmq.com/docs/dlx" target="_blank" rel="noopener">RabbitMQ — Dead Letter Exchanges</a> — як налаштувати DLQ і поворотні черги.</li>
+    <li><a href="https://kafka.apache.org/documentation/#introduction" target="_blank" rel="noopener">Apache Kafka — Introduction</a> — офіційне пояснення topic, partition, offset, consumer group і гарантій.</li>
+    <li><a href="https://developer.confluent.io/courses/apache-kafka/events/" target="_blank" rel="noopener">Confluent — Apache Kafka 101</a> — безкоштовний відеокурс від творців Kafka з мінімумом теорії.</li>
+    <li><a href="https://kafka.js.org/docs/getting-started" target="_blank" rel="noopener">KafkaJS — Getting Started</a> — документація бібліотеки, використаної в прикладах: producer, consumer groups, idempotent producer.</li>
+    <li><a href="https://amqp-node.github.io/amqplib/" target="_blank" rel="noopener">amqplib — документація</a> — довідник API для Node-клієнта RabbitMQ: assertQueue, consume, ack/nack, prefetch.</li>
+    <li><a href="https://pragprog.com/titles/mnee2/release-it-second-edition/" target="_blank" rel="noopener">Michael Nygard — Release It! (2nd ed.)</a> — книга, що ввела circuit breaker і bulkhead; історії реальних каскадних відмов.</li>
+    <li><a href="https://www.enterpriseintegrationpatterns.com/patterns/messaging/" target="_blank" rel="noopener">Enterprise Integration Patterns (Hohpe, Woolf)</a> — класичний каталог патернів обміну повідомленнями: Message Channel, Dead Letter, Idempotent Receiver.</li>
+    <li><a href="https://www.informit.com/store/domain-driven-design-distilled-9780134434421" target="_blank" rel="noopener">Vaughn Vernon — Domain-Driven Design Distilled</a> — коротка книга про bounded context, агрегати й events без 500 сторінок "синьої книги".</li>
+    <li><a href="https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/" target="_blank" rel="noopener">AWS Builders' Library — Timeouts, retries, and backoff with jitter</a> — звідки взято рецепт full jitter; з графіками, чому він працює.</li>
+    <li><a href="https://www.w3.org/TR/trace-context/" target="_blank" rel="noopener">W3C Trace Context</a> — стандарт заголовка traceparent для передачі correlation/trace id між сервісами.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 13</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

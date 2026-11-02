@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02. Frontend: HTML, CSS, JavaScript — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 02 · <span class="level-badge level-1">Новачок</span></div>
+  <h1>Frontend: HTML, CSS, JavaScript</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, з чого складається будь-яка вебсторінка, як три мови ділять між собою роботу, і зберете власний застосунок «список справ» з нуля.</p>
+  <div class="meta"><span>⏱ ~90 хв</span><span>📚 Передумови: розділ 01</span><span>🎯 Ціль: HTML-структура, CSS-розкладка, JS-логіка, DOM, fetch, localStorage</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Три мови — одна сторінка</a></li>
+    <li><a href="#s2">HTML: скелет</a></li>
+    <li><a href="#s3">CSS: одяг</a></li>
+    <li><a href="#s4">JavaScript: мозок</a></li>
+    <li><a href="#s5">DOM і події</a></li>
+    <li><a href="#s6">fetch: розмова з сервером</a></li>
+    <li><a href="#s7">localStorage: пам'ять браузера</a></li>
+    <li><a href="#s8">Доступність і DevTools</a></li>
+    <li><a href="#s9">Проєкт: список справ</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви ляльку-робота. <strong>HTML</strong> — це її скелет: голова, руки, ноги, і що до чого прикріплено. Без скелета — просто купка деталей на підлозі. <strong>CSS</strong> — це одяг і макіяж: якого кольору сукня, чи великий капелюх, чи стоять руки в боки. Один скелет можна одягнути тисячею способів. <strong>JavaScript</strong> — це мозок: коли натиснути на ніс — робот моргає, коли сказати «привіт» — махає рукою. Браузер збирає всі три частини разом і показує тобі живу сторінку. А ще робот уміє дзвонити на кухню (сервер) і просити нові дані — це <strong>fetch</strong>.</p>
+</div>
+
+<h2 id="s1">1. Три мови — одна сторінка</h2>
+<p>У розділі 01 ми побачили, що сервер надсилає браузеру HTML, а браузер будує з нього DOM і малює пікселі. Тепер подивимось на ці три складові з боку того, хто їх пише. Головний принцип — <strong>розділення відповідальностей (separation of concerns)</strong>: кожна мова робить одну справу і не лізе в чужу.</p>
+<ul>
+  <li><strong>HTML (HyperText Markup Language)</strong> описує <em>що</em> на сторінці: заголовок, абзац, список, кнопка, картинка. Це не мова програмування — там немає умов і циклів. Це мова <em>розмітки</em>.</li>
+  <li><strong>CSS (Cascading Style Sheets)</strong> описує, <em>як це виглядає</em>: колір, розмір, розташування, анімація.</li>
+  <li><strong>JavaScript</strong> описує, <em>що відбувається</em>: натиснули — з'явилось, ввели — перевірилось, минула секунда — оновилось.</li>
+</ul>
+<p>Мінімальна сторінка, яка підключає всі три частини:</p>
+<pre><code class="language-html">&lt;!doctype html&gt;
+&lt;html lang="uk"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;title&gt;Мій перший сайт&lt;/title&gt;
+  &lt;link rel="stylesheet" href="style.css"&gt;   &lt;!-- одяг --&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1&gt;Привіт, світе!&lt;/h1&gt;                   &lt;!-- скелет --&gt;
+  &lt;button id="btn"&gt;Натисни&lt;/button&gt;
+  &lt;script src="app.js" defer&gt;&lt;/script&gt;      &lt;!-- мозок --&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<p>Зверніть увагу на <code>defer</code> у скрипта: як ми з'ясували в розділі 01, без нього браузер зупинить парсинг HTML, щоб виконати скрипт, і <code>document.getElementById("btn")</code> поверне <code>null</code>, бо кнопки ще не існує.</p>
+
+<h2 id="s2">2. HTML: скелет</h2>
+<h3>Теги, елементи, атрибути</h3>
+<p>HTML складається з <strong>елементів (elements)</strong>. Елемент — це відкривальний <strong>тег (tag)</strong>, вміст і закривальний тег: <code>&lt;p&gt;Текст&lt;/p&gt;</code>. Деякі елементи порожні і не мають закривального тега: <code>&lt;img&gt;</code>, <code>&lt;br&gt;</code>, <code>&lt;input&gt;</code>. Тег може мати <strong>атрибути (attributes)</strong> — додаткові налаштування у вигляді <code>ім'я="значення"</code>:</p>
+<pre><code class="language-html">&lt;a href="https://example.com" target="_blank" rel="noopener"&gt;Посилання&lt;/a&gt;
+&lt;img src="cat.jpg" alt="Рудий кіт спить на клавіатурі" width="300"&gt;
+&lt;input type="email" name="email" placeholder="you@example.com" required&gt;</code></pre>
+<p>Атрибут <code>alt</code> у картинки — не декорація: його читає скрінрідер для незрячих і показує браузер, якщо картинка не завантажилась. Атрибут <code>id</code> — унікальний ідентифікатор елемента на сторінці, <code>class</code> — «ярлик», який можна повісити на багато елементів одразу; за ними CSS і JS знаходять потрібні елементи.</p>
+
+<h3>Семантика: називай речі своїми іменами</h3>
+<p>Можна зробити всю сторінку з <code>&lt;div&gt;</code> — і вона працюватиме. Але браузер, пошуковик і скрінрідер не зрозуміють, де шапка, а де основний зміст. <strong>Семантичні теги (semantic tags)</strong> кажуть, <em>що це за частина</em>:</p>
+<div class="table-wrap">
+<table>
+  <tr><th>Тег</th><th>Що означає</th></tr>
+  <tr><td><code>&lt;header&gt;</code></td><td>Шапка сторінки або секції: логотип, назва</td></tr>
+  <tr><td><code>&lt;nav&gt;</code></td><td>Навігація: меню, посилання</td></tr>
+  <tr><td><code>&lt;main&gt;</code></td><td>Основний зміст — рівно один на сторінку</td></tr>
+  <tr><td><code>&lt;article&gt;</code></td><td>Самодостатній блок: стаття, пост, картка товару</td></tr>
+  <tr><td><code>&lt;section&gt;</code></td><td>Тематична секція, зазвичай із заголовком</td></tr>
+  <tr><td><code>&lt;aside&gt;</code></td><td>Побічне: бічна панель, примітка</td></tr>
+  <tr><td><code>&lt;footer&gt;</code></td><td>Підвал: контакти, копірайт</td></tr>
+  <tr><td><code>&lt;h1&gt;…&lt;h6&gt;</code></td><td>Заголовки за рівнями; <code>h1</code> — один на сторінку</td></tr>
+  <tr><td><code>&lt;ul&gt;/&lt;ol&gt;/&lt;li&gt;</code></td><td>Список маркований / нумерований / пункт</td></tr>
+  <tr><td><code>&lt;button&gt;</code></td><td>Кнопка (не <code>&lt;div onclick&gt;</code>!) — працює з клавіатури, має фокус</td></tr>
+</table>
+</div>
+
+<h3>Форми: як користувач щось надсилає</h3>
+<p><strong>Форма (form)</strong> — головний спосіб зібрати дані від людини. Кожне поле має <code>name</code> — під цим іменем значення полетить на сервер. <code>&lt;label for="..."&gt;</code> зв'язує підпис із полем: клік по підпису ставить фокус у поле, а скрінрідер читає підпис.</p>
+<pre><code class="language-html">&lt;form action="/api/subscribe" method="post"&gt;
+  &lt;label for="email"&gt;Ваш email&lt;/label&gt;
+  &lt;input id="email" name="email" type="email" required&gt;
+
+  &lt;label for="plan"&gt;Тариф&lt;/label&gt;
+  &lt;select id="plan" name="plan"&gt;
+    &lt;option value="free"&gt;Безкоштовний&lt;/option&gt;
+    &lt;option value="pro"&gt;Pro&lt;/option&gt;
+  &lt;/select&gt;
+
+  &lt;label&gt;&lt;input type="checkbox" name="agree" required&gt; Погоджуюсь з умовами&lt;/label&gt;
+
+  &lt;button type="submit"&gt;Підписатися&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+<p>Без JavaScript браузер сам відправить <code>POST /api/subscribe</code> з тілом <code>email=...&amp;plan=pro&amp;agree=on</code> і перезавантажить сторінку. Атрибут <code>required</code> і <code>type="email"</code> дають безкоштовну валідацію на клієнті — але сервер <em>завжди</em> перевіряє ще раз, бо клієнту довіряти не можна.</p>
+
+<h3>Повна сторінка</h3>
+<pre><code class="language-html">&lt;!doctype html&gt;
+&lt;html lang="uk"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;title&gt;Блог про котів&lt;/title&gt;
+  &lt;link rel="stylesheet" href="style.css"&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;header&gt;
+    &lt;h1&gt;Блог про котів&lt;/h1&gt;
+    &lt;nav&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;a href="/"&gt;Головна&lt;/a&gt;&lt;/li&gt;
+        &lt;li&gt;&lt;a href="/about"&gt;Про нас&lt;/a&gt;&lt;/li&gt;
+      &lt;/ul&gt;
+    &lt;/nav&gt;
+  &lt;/header&gt;
+
+  &lt;main&gt;
+    &lt;article&gt;
+      &lt;h2&gt;Чому коти сплять 16 годин&lt;/h2&gt;
+      &lt;p&gt;Бо можуть. &lt;strong&gt;Важливо:&lt;/strong&gt; не будіть.&lt;/p&gt;
+      &lt;img src="/img/sleepy.jpg" alt="Кіт спить на сонці"&gt;
+    &lt;/article&gt;
+    &lt;aside&gt;Схожі статті...&lt;/aside&gt;
+  &lt;/main&gt;
+
+  &lt;footer&gt;&amp;copy; 2026 Котоблог&lt;/footer&gt;
+  &lt;script src="app.js" defer&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Семантичний HTML — це безкоштовна доступність, SEO і зрозумілий код одночасно. Кнопка <code>&lt;button&gt;</code> сама реагує на Enter і пробіл, отримує фокус із Tab і повідомляє скрінрідеру «кнопка». Щоб те саме зробив <code>&lt;div&gt;</code>, треба написати 20 рядків JS і все одно щось забути.</p>
+</div>
+
+<h2 id="s3">3. CSS: одяг</h2>
+<h3>Селектори і каскад</h3>
+<p>CSS-правило = <strong>селектор (selector)</strong> (кого стилізуємо) + блок <strong>властивостей (properties)</strong>:</p>
+<pre><code class="language-css">/* за тегом */
+p { line-height: 1.6; }
+
+/* за класом — найпоширеніший спосіб */
+.card { padding: 16px; border-radius: 12px; }
+
+/* за id — унікальний елемент */
+#header { position: sticky; top: 0; }
+
+/* вкладеність: посилання всередині nav */
+nav a { text-decoration: none; }
+
+/* стан: при наведенні */
+.card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+
+/* атрибут */
+input[type="email"] { border-color: blue; }</code></pre>
+<p>«Каскадні» в назві означає: якщо на один елемент претендують кілька правил, перемагає більш <strong>специфічне (specificity)</strong> — id сильніший за клас, клас сильніший за тег; при рівній силі — те, що написане нижче. Правило з <code>!important</code> ламає всю систему, тому його уникають.</p>
+
+<h3>Блокова модель (box model)</h3>
+<p>Кожен елемент — це прямокутна коробка з чотирьох шарів: вміст (content), внутрішній відступ (padding), рамка (border), зовнішній відступ (margin). Це як подарунок: сама річ, м'який папір навколо, коробка, і простір між коробками на полиці.</p>
+
+<figure>
+  <svg viewBox="0 0 720 300" role="img" aria-label="Блокова модель CSS">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="40" y="20" width="440" height="260" rx="8" class="accent" stroke-dasharray="6 5"/>
+    <text x="60" y="44" class="bold">margin</text>
+    <text x="60" y="62" class="muted">зовнішній відступ — простір між коробками</text>
+    <rect x="90" y="75" width="340" height="180" rx="6" class="red"/>
+    <text x="110" y="97" class="bold">border</text>
+    <text x="110" y="113" class="muted">рамка</text>
+    <rect x="130" y="120" width="260" height="110" rx="6" class="blue"/>
+    <text x="150" y="142" class="bold">padding</text>
+    <text x="150" y="158" class="muted">внутрішній відступ</text>
+    <rect x="170" y="170" width="180" height="40" rx="4" class="green"/>
+    <text x="260" y="195" text-anchor="middle" class="bold">content</text>
+
+    <text x="520" y="60" class="bold">box-sizing:</text>
+    <text x="520" y="85" class="mono">content-box</text>
+    <text x="520" y="103" class="small">width = лише content</text>
+    <text x="520" y="135" class="mono">border-box ✓</text>
+    <text x="520" y="153" class="small">width = content +</text>
+    <text x="520" y="169" class="small">padding + border</text>
+    <text x="520" y="200" class="small">Другий варіант</text>
+    <text x="520" y="216" class="small">передбачуваніший —</text>
+    <text x="520" y="232" class="small">вмикайте всім: * {</text>
+    <text x="520" y="248" class="small">box-sizing:border-box }</text>
+  </svg>
+  <figcaption>Схема 1. Чотири шари блокової моделі і два режими підрахунку ширини.</figcaption>
+</figure>
+
+<pre><code class="language-css">/* Робимо box model передбачуваною для всіх елементів */
+*, *::before, *::after { box-sizing: border-box; }
+
+.card {
+  width: 300px;        /* з border-box це вже включає padding і border */
+  padding: 16px;
+  border: 2px solid #ddd;
+  margin: 12px auto;   /* auto по горизонталі центрує блок */
+}</code></pre>
+
+<h3>Flexbox: розкладка в один ряд</h3>
+<p><strong>Flexbox</strong> — інструмент для розташування елементів уздовж <em>однієї осі</em>: у рядок або в колонку. Батько отримує <code>display:flex</code> і стає «командиром», діти шикуються. Це як полиця: речі стоять в ряд, а ви керуєте, чи притиснуті вони до лівого краю, розтягнуті чи рівномірно розсунуті.</p>
+
+<figure>
+  <svg viewBox="0 0 720 330" role="img" aria-label="Flexbox та Grid">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="180" y="24" text-anchor="middle" class="bold">Flexbox: одна вісь</text>
+    <rect x="20" y="36" width="320" height="70" rx="8" class="box-fill"/>
+    <text x="30" y="52" class="mono">display:flex; gap:8px</text>
+    <rect x="30" y="60" width="70" height="36" rx="6" class="blue"/>
+    <rect x="108" y="60" width="70" height="36" rx="6" class="blue"/>
+    <rect x="186" y="60" width="70" height="36" rx="6" class="blue"/>
+    <path d="M30 118 L330 118" class="arrow"/>
+    <text x="180" y="136" text-anchor="middle" class="small">головна вісь (justify-content)</text>
+
+    <rect x="20" y="150" width="320" height="70" rx="8" class="box-fill"/>
+    <text x="30" y="166" class="mono">justify-content:space-between</text>
+    <rect x="30" y="174" width="70" height="36" rx="6" class="blue"/>
+    <rect x="145" y="174" width="70" height="36" rx="6" class="blue"/>
+    <rect x="260" y="174" width="70" height="36" rx="6" class="blue"/>
+
+    <rect x="20" y="234" width="320" height="70" rx="8" class="box-fill"/>
+    <text x="30" y="250" class="mono">flex:1 на середньому</text>
+    <rect x="30" y="258" width="60" height="36" rx="6" class="blue"/>
+    <rect x="98" y="258" width="164" height="36" rx="6" class="green"/>
+    <rect x="270" y="258" width="60" height="36" rx="6" class="blue"/>
+
+    <text x="540" y="24" text-anchor="middle" class="bold">Grid: дві осі</text>
+    <rect x="380" y="36" width="320" height="268" rx="8" class="box-fill"/>
+    <text x="390" y="52" class="mono">grid-template-columns:</text>
+    <text x="390" y="68" class="mono">200px 1fr; gap:8px</text>
+    <rect x="390" y="80" width="300" height="40" rx="6" class="purple"/>
+    <text x="540" y="105" text-anchor="middle" class="small">header (grid-column: 1 / -1)</text>
+    <rect x="390" y="128" width="110" height="120" rx="6" class="purple"/>
+    <text x="445" y="192" text-anchor="middle" class="small">sidebar</text>
+    <rect x="508" y="128" width="182" height="120" rx="6" class="purple"/>
+    <text x="599" y="192" text-anchor="middle" class="small">main</text>
+    <rect x="390" y="256" width="300" height="40" rx="6" class="purple"/>
+    <text x="540" y="281" text-anchor="middle" class="small">footer</text>
+  </svg>
+  <figcaption>Схема 2. Flexbox керує однією віссю (ряд або колонка), Grid — двома одразу (рядки і колонки).</figcaption>
+</figure>
+
+<pre><code class="language-css">.toolbar {
+  display: flex;
+  justify-content: space-between; /* розсунути по головній осі */
+  align-items: center;            /* вирівняти по поперечній осі */
+  gap: 12px;                      /* відстань між дітьми */
+}
+.toolbar .search { flex: 1; }     /* забрати весь вільний простір */
+
+/* Grid: класична сторінка з шапкою, бічною панеллю і підвалом */
+.page {
+  display: grid;
+  grid-template-columns: 240px 1fr;      /* дві колонки */
+  grid-template-rows: auto 1fr auto;     /* три рядки */
+  grid-template-areas:
+    "header header"
+    "sidebar main"
+    "footer footer";
+  min-height: 100vh;
+  gap: 16px;
+}
+.page > header  { grid-area: header; }
+.page > aside   { grid-area: sidebar; }
+.page > main    { grid-area: main; }
+.page > footer  { grid-area: footer; }</code></pre>
+
+<h3>Адаптивність і медіазапити</h3>
+<p>Сайт відкривають з телефону (375px) і з монітора (2560px). <strong>Медіазапити (media queries)</strong> дозволяють змінювати стилі залежно від ширини екрана. Сучасний підхід — <strong>mobile-first</strong>: спочатку пишемо стилі для вузького екрана, потім додаємо правила для ширших:</p>
+<pre><code class="language-css">/* базові стилі — для мобільного */
+.page { grid-template-columns: 1fr; grid-template-areas: "header" "main" "sidebar" "footer"; }
+
+/* від 900px — дві колонки */
+@media (min-width: 900px) {
+  .page {
+    grid-template-columns: 240px 1fr;
+    grid-template-areas: "header header" "sidebar main" "footer footer";
+  }
+}</code></pre>
+<p>Обов'язковий тег <code>&lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;</code> у <code>&lt;head&gt;</code> — без нього телефон покаже сторінку як зменшену версію десктопної, і медіазапити не спрацюють.</p>
+
+<h3>CSS-змінні</h3>
+<p><strong>Користувацькі властивості (custom properties)</strong> — змінні прямо в CSS. Ідеально для тем і повторюваних значень:</p>
+<pre><code class="language-css">:root {
+  --color-primary: #1f6feb;
+  --space: 16px;
+  --radius: 12px;
+}
+.button { background: var(--color-primary); padding: var(--space); border-radius: var(--radius); }
+
+/* темна тема: перевизначаємо тільки змінні */
+@media (prefers-color-scheme: dark) {
+  :root { --color-primary: #6ea8ff; }
+}</code></pre>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li>Забули <code>box-sizing: border-box</code> — і елемент шириною 100% + padding 16px вилазить за екран, з'являється горизонтальний скрол.</li>
+    <li><code>margin</code> сусідніх блоків по вертикалі <em>схлопується</em> (margin collapsing): два відступи по 20px дають 20, а не 40. У flex/grid контейнерах цього не відбувається.</li>
+    <li>Селектор із трьома класами і id перебиває все — потім не зрозуміло, чому стиль «не застосовується». Тримайте специфічність низькою: один клас на правило.</li>
+    <li><code>height: 100%</code> не працює, якщо у батька не задано висоту. Для повного екрана використовуйте <code>min-height: 100vh</code> або <code>100dvh</code>.</li>
+  </ul>
+</div>
+
+<h2 id="s4">4. JavaScript: мозок</h2>
+<h3>Змінні і типи</h3>
+<p>У сучасному JS змінні оголошують через <code>const</code> (не можна переприсвоїти) і <code>let</code> (можна). <code>var</code> — застарілий, не використовуйте. За замовчуванням пишіть <code>const</code>, а <code>let</code> — лише коли справді треба міняти.</p>
+<pre><code class="language-js">const name = "Мурчик";       // рядок (string)
+let age = 3;                 // число (number) — і цілі, і дробові
+const isHungry = true;       // логічний (boolean)
+let owner = null;            // «навмисно порожньо»
+let nickname;                // undefined — «ще не задано»
+const big = 12345678901234567890n; // bigint
+const id = Symbol("id");     // symbol — унікальний ключ
+
+// об'єкт — набір пар ключ: значення (як картка в картотеці)
+const cat = { name: "Мурчик", age: 3, tags: ["рудий", "ледачий"] };
+
+// масив — впорядкований список
+const cats = ["Мурчик", "Барсик", "Сімба"];
+
+console.log(typeof name, typeof age, typeof cat, typeof cats);
+// "string" "number" "object" "object"  (масив теж object!)
+console.log(Array.isArray(cats)); // true</code></pre>
+
+<h3>Функції і стрілки</h3>
+<pre><code class="language-js">// звичайна функція
+function greet(who) {
+  return `Привіт, ${who}!`;   // шаблонний рядок з підстановкою
+}
+
+// стрілкова функція — коротший запис
+const greet2 = (who) => `Привіт, ${who}!`;
+
+// параметри за замовчуванням
+const greet3 = (who = "світе") => `Привіт, ${who}!`;
+
+console.log(greet("Мурчику"), greet2("Барсику"), greet3());</code></pre>
+<p>Стрілкові функції не мають власного <code>this</code> — для звичайних колбеків це зручно, для методів об'єктів іноді ні. Поки що правило: колбеки і короткі функції — стрілки, «іменні» функції верхнього рівня — <code>function</code>.</p>
+
+<h3>Масиви і об'єкти: щоденна робота</h3>
+<pre><code class="language-js">const todos = [
+  { id: 1, text: "Купити молоко", done: false },
+  { id: 2, text: "Написати код", done: true },
+  { id: 3, text: "Погуляти", done: false },
+];
+
+// map — перетворити кожен елемент, отримати новий масив
+const texts = todos.map((t) => t.text);            // ["Купити молоко", ...]
+
+// filter — відібрати ті, що підходять
+const active = todos.filter((t) => !t.done);       // 2 елементи
+
+// find — перший, що підходить (або undefined)
+const second = todos.find((t) => t.id === 2);
+
+// reduce — «згорнути» масив в одне значення
+const doneCount = todos.reduce((sum, t) => sum + (t.done ? 1 : 0), 0); // 1
+
+// деструктуризація — витягти поля в змінні
+const { text, done } = todos[0];
+const [first, ...rest] = todos;   // first = перший, rest = решта
+
+// spread — розгорнути; створює НОВИЙ об'єкт/масив, не змінює старий
+const updated = { ...todos[0], done: true };
+const more = [...todos, { id: 4, text: "Спати", done: false }];</code></pre>
+<p>Зверніть увагу: <code>map</code>, <code>filter</code>, spread — усі повертають <em>нові</em> структури і не чіпають старі. Це називається <strong>імутабельність (immutability)</strong>, і на ній тримаються React та інші фреймворки з розділу 08.</p>
+
+<h3>Асинхронність: async/await</h3>
+<p>JavaScript у браузері працює в <strong>одному потоці</strong>. Якщо запит до сервера триває 2 секунди, а ми його «чекаємо» звичайним способом — сторінка замерзне. Тому довгі операції <em>асинхронні</em>: ми кажемо «зроби це, а коли буде готово — поклич мене», і продовжуємо працювати. Це як замовити каву і сісти за столик, замість того щоб стояти біля бариста.</p>
+<pre><code class="language-js">// Promise — «обіцянка» повернути результат потім
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// async/await — синтаксис, щоб писати асинхронне як синхронне
+async function main() {
+  console.log("Замовив каву");
+  await wait(2000);          // чекаємо, але сторінка НЕ замерзає
+  console.log("Кава готова");
+}
+main();
+console.log("Сів за столик"); // виведеться ДО «Кава готова»</code></pre>
+
+<figure>
+  <svg viewBox="0 0 720 280" role="img" aria-label="Цикл подій JavaScript">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="30" width="180" height="200" rx="12" class="blue"/>
+    <text x="110" y="55" text-anchor="middle" class="bold">Стек викликів</text>
+    <text x="110" y="73" text-anchor="middle" class="muted">(call stack) — один потік</text>
+    <rect x="40" y="90" width="140" height="30" rx="6" class="box-fill"/>
+    <text x="110" y="110" text-anchor="middle" class="mono">main()</text>
+    <rect x="40" y="128" width="140" height="30" rx="6" class="box-fill"/>
+    <text x="110" y="148" text-anchor="middle" class="mono">console.log()</text>
+    <text x="110" y="210" text-anchor="middle" class="small">виконує по одній справі</text>
+
+    <rect x="270" y="30" width="180" height="90" rx="12" class="accent"/>
+    <text x="360" y="55" text-anchor="middle" class="bold">Web API</text>
+    <text x="360" y="75" text-anchor="middle" class="muted">setTimeout, fetch,</text>
+    <text x="360" y="93" text-anchor="middle" class="muted">події DOM — «бариста»</text>
+    <path d="M200 100 L270 80" class="arrow"/>
+    <text x="235" y="72" text-anchor="middle" class="small">делегує</text>
+
+    <rect x="270" y="150" width="180" height="80" rx="12" class="green"/>
+    <text x="360" y="175" text-anchor="middle" class="bold">Черга завдань</text>
+    <text x="360" y="195" text-anchor="middle" class="muted">(task queue)</text>
+    <text x="360" y="213" text-anchor="middle" class="mono">[ колбек, колбек ]</text>
+    <path d="M360 120 L360 150" class="arrow"/>
+    <text x="400" y="140" class="small">готово →</text>
+
+    <rect x="520" y="90" width="180" height="90" rx="12" class="purple"/>
+    <text x="610" y="118" text-anchor="middle" class="bold">Event loop</text>
+    <text x="610" y="138" text-anchor="middle" class="muted">«стек порожній?</text>
+    <text x="610" y="156" text-anchor="middle" class="muted">беру з черги»</text>
+    <path d="M450 190 C 500 190, 520 170, 530 165" class="arrow"/>
+    <path d="M520 100 C 400 -10, 110 -10, 110 30" class="arrow dashed"/>
+    <text x="360" y="262" text-anchor="middle" class="muted">Тому «Сів за столик» друкується раніше, ніж «Кава готова»</text>
+  </svg>
+  <figcaption>Схема 3. Цикл подій (event loop): довгі операції йдуть у Web API, їхні колбеки повертаються через чергу, коли стек порожній.</figcaption>
+</figure>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Майже кожна дія frontend-розробника — асинхронна: запит до API, таймер, клік, анімація. Якщо не зрозуміти <code>await</code> і чергу подій зараз, то далі буде постійне «чому змінна <code>undefined</code>, я ж її щойно отримав із сервера?». Відповідь завжди одна: ви прочитали її раніше, ніж обіцянка виконалась.</p>
+</div>
+
+<h2 id="s5">5. DOM і події</h2>
+<p>Як ми бачили в розділі 01, браузер перетворює HTML на дерево — <strong>DOM (Document Object Model)</strong>. JavaScript працює не з текстом HTML, а з цим деревом: шукає вузли, змінює їх, додає нові, слухає події.</p>
+
+<figure>
+  <svg viewBox="0 0 720 320" role="img" aria-label="Дерево DOM">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="300" y="15" width="120" height="36" rx="10" class="purple"/>
+    <text x="360" y="39" text-anchor="middle" class="mono">document</text>
+    <rect x="300" y="75" width="120" height="36" rx="10" class="blue"/>
+    <text x="360" y="99" text-anchor="middle" class="mono">html</text>
+    <path d="M360 51 L360 75" class="arrow"/>
+
+    <rect x="140" y="135" width="120" height="36" rx="10" class="blue"/>
+    <text x="200" y="159" text-anchor="middle" class="mono">head</text>
+    <rect x="460" y="135" width="120" height="36" rx="10" class="blue"/>
+    <text x="520" y="159" text-anchor="middle" class="mono">body</text>
+    <path d="M330 111 L230 135" class="arrow"/>
+    <path d="M390 111 L490 135" class="arrow"/>
+
+    <rect x="140" y="195" width="120" height="36" rx="10" class="green"/>
+    <text x="200" y="219" text-anchor="middle" class="mono">title</text>
+    <path d="M200 171 L200 195" class="arrow"/>
+    <rect x="140" y="255" width="120" height="36" rx="10" class="accent"/>
+    <text x="200" y="279" text-anchor="middle" class="small">"Мій сайт"</text>
+    <path d="M200 231 L200 255" class="arrow"/>
+
+    <rect x="340" y="195" width="110" height="36" rx="10" class="green"/>
+    <text x="395" y="219" text-anchor="middle" class="mono">h1</text>
+    <rect x="470" y="195" width="110" height="36" rx="10" class="green"/>
+    <text x="525" y="219" text-anchor="middle" class="mono">ul#list</text>
+    <rect x="600" y="195" width="110" height="36" rx="10" class="green"/>
+    <text x="655" y="219" text-anchor="middle" class="mono">button</text>
+    <path d="M500 171 L410 195" class="arrow"/>
+    <path d="M520 171 L525 195" class="arrow"/>
+    <path d="M550 171 L640 195" class="arrow"/>
+
+    <rect x="450" y="255" width="70" height="36" rx="10" class="green"/>
+    <text x="485" y="279" text-anchor="middle" class="mono">li</text>
+    <rect x="530" y="255" width="70" height="36" rx="10" class="green"/>
+    <text x="565" y="279" text-anchor="middle" class="mono">li</text>
+    <path d="M510 231 L490 255" class="arrow"/>
+    <path d="M540 231 L560 255" class="arrow"/>
+    <text x="80" y="300" class="muted">Вузли: елементи,</text>
+    <text x="80" y="316" class="muted">текст, атрибути</text>
+  </svg>
+  <figcaption>Схема 4. DOM — дерево вузлів. <code>document</code> — корінь, кожен тег — вузол, текст — теж вузол.</figcaption>
+</figure>
+
+<pre><code class="language-js">// Знайти елементи
+const title = document.querySelector("h1");           // перший h1
+const items = document.querySelectorAll("#list li");  // усі li в #list (NodeList)
+const btn = document.getElementById("add");
+
+// Прочитати / змінити
+title.textContent = "Новий заголовок";   // текст (безпечно)
+title.classList.add("highlight");        // додати клас
+title.style.color = "red";               // інлайн-стиль (краще через клас)
+btn.disabled = true;                     // атрибут-властивість
+
+// Створити і вставити
+const li = document.createElement("li");
+li.textContent = "Новий пункт";
+document.getElementById("list").append(li);
+
+// Видалити
+li.remove();</code></pre>
+<p><strong>Ніколи</strong> не вставляйте текст користувача через <code>innerHTML</code> — якщо він введе <code>&lt;script&gt;</code> або <code>&lt;img onerror=...&gt;</code>, ви отримаєте <strong>XSS (Cross-Site Scripting)</strong>. <code>textContent</code> вставляє текст як текст, і теги не виконуються.</p>
+
+<h3>Події</h3>
+<p><strong>Подія (event)</strong> — це сигнал: «клікнули», «ввели символ», «сторінка завантажилась», «прокрутили». Ми підписуємось на подію через <code>addEventListener</code> і передаємо функцію-обробник:</p>
+<pre><code class="language-js">const form = document.querySelector("form");
+const input = document.querySelector("#todo-input");
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();          // не перезавантажувати сторінку
+  const text = input.value.trim(); // що ввів користувач
+  if (!text) return;
+  addTodo(text);
+  input.value = "";
+});
+
+// Делегування: один слухач на список замість слухача на кожен li
+document.querySelector("#list").addEventListener("click", (event) => {
+  const li = event.target.closest("li"); // на якому li клікнули?
+  if (!li) return;
+  li.classList.toggle("done");
+});</code></pre>
+<p>Події «спливають» (bubbling): клік по <code>&lt;li&gt;</code> спочатку спрацьовує на ньому, потім на <code>&lt;ul&gt;</code>, потім на <code>&lt;body&gt;</code>. Тому можна повісити один слухач на батька і ловити кліки всіх дітей, включно з тими, що з'являться пізніше. Це <strong>делегування подій (event delegation)</strong>.</p>
+
+<h2 id="s6">6. fetch: розмова з сервером</h2>
+<p>Усе, що ми досі робили, живе в браузері. Щоб отримати дані з сервера (розділ 01: запит → відповідь), використовують <code>fetch</code>. Він повертає Promise, тому працює з <code>await</code>. Головне правило: <em>перевіряйте статус і ловіть помилки</em>. <code>fetch</code> не кидає виняток на 404 чи 500 — тільки на мережеву помилку.</p>
+<pre><code class="language-js">async function loadTodos() {
+  try {
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos?_limit=5");
+
+    if (!res.ok) {                      // ok = статус 200–299
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const todos = await res.json();     // тіло → JS-масив
+    render(todos);
+  } catch (err) {                       // мережа впала, JSON битий, або наш throw
+    console.error("Не вдалося завантажити:", err);
+    showError("Щось пішло не так. Спробуйте пізніше.");
+  }
+}
+
+// Відправити дані (POST з JSON)
+async function createTodo(text) {
+  const res = await fetch("/api/todos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, done: false }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();                    // сервер зазвичай повертає створений об'єкт
+}</code></pre>
+
+<figure>
+  <svg viewBox="0 0 720 260" role="img" aria-label="Потік fetch-запиту з обробкою помилок">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="90" width="130" height="60" rx="12" class="blue"/>
+    <text x="85" y="115" text-anchor="middle" class="bold">fetch(url)</text>
+    <text x="85" y="135" text-anchor="middle" class="muted">await</text>
+    <path d="M150 120 L220 120" class="arrow"/>
+
+    <rect x="220" y="90" width="140" height="60" rx="12" class="accent"/>
+    <text x="290" y="115" text-anchor="middle" class="bold">Мережа</text>
+    <text x="290" y="135" text-anchor="middle" class="muted">DNS, TCP, HTTP</text>
+    <path d="M290 150 L290 200" class="arrow"/>
+    <rect x="215" y="200" width="150" height="44" rx="10" class="red"/>
+    <text x="290" y="227" text-anchor="middle" class="small">впала → catch</text>
+
+    <path d="M360 120 L430 120" class="arrow"/>
+    <rect x="430" y="90" width="120" height="60" rx="12" class="purple"/>
+    <text x="490" y="115" text-anchor="middle" class="bold">res.ok?</text>
+    <text x="490" y="135" text-anchor="middle" class="muted">статус 2xx</text>
+    <path d="M490 150 L490 200" class="arrow"/>
+    <rect x="425" y="200" width="130" height="44" rx="10" class="red"/>
+    <text x="490" y="227" text-anchor="middle" class="small">ні → throw → catch</text>
+
+    <path d="M550 120 L600 120" class="arrow"/>
+    <rect x="600" y="90" width="110" height="60" rx="12" class="green"/>
+    <text x="655" y="115" text-anchor="middle" class="bold">res.json()</text>
+    <text x="655" y="135" text-anchor="middle" class="muted">→ render()</text>
+    <text x="360" y="50" text-anchor="middle" class="muted">Три точки, де може піти не так — і всі ведуть у catch</text>
+  </svg>
+  <figcaption>Схема 5. Життєвий цикл fetch: мережа може впасти, статус може бути не 2xx, JSON може бути битий.</figcaption>
+</figure>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><strong>CORS.</strong> Якщо сторінка на <code>localhost:5173</code> робить fetch до <code>localhost:3000</code>, браузер заблокує відповідь, поки сервер не надішле заголовок <code>Access-Control-Allow-Origin</code>. Це захист браузера, а не помилка вашого коду. Рішення — на сервері (розділ 04).</li>
+    <li>Забули <code>await</code> перед <code>res.json()</code> — отримали Promise замість даних.</li>
+    <li>Забули перевірити <code>res.ok</code> — сервер повернув 500 з HTML-сторінкою помилки, <code>res.json()</code> впав із «Unexpected token &lt;».</li>
+  </ul>
+</div>
+
+<h2 id="s7">7. localStorage: пам'ять браузера</h2>
+<p><strong>localStorage</strong> — маленьке сховище «ключ → рядок» у браузері, яке переживає перезавантаження і закриття вкладки. Це шухляда для дрібниць: тема, чернетка, список справ без сервера. Обмеження ~5 МБ, тільки рядки (об'єкти серіалізуємо в JSON), і доступне будь-якому скрипту на цій сторінці — тому <em>ніколи</em> не кладіть туди токени й паролі.</p>
+<pre><code class="language-js">const KEY = "todos";
+
+function saveTodos(todos) {
+  localStorage.setItem(KEY, JSON.stringify(todos)); // об'єкт → рядок
+}
+
+function loadTodos() {
+  try {
+    const raw = localStorage.getItem(KEY);           // рядок або null
+    return raw ? JSON.parse(raw) : [];               // рядок → об'єкт
+  } catch {
+    return [];                                       // битий JSON або приватний режим
+  }
+}
+
+localStorage.removeItem(KEY);  // видалити один ключ
+localStorage.clear();          // очистити все для цього сайту</code></pre>
+<p>Є ще <code>sessionStorage</code> (те саме, але живе до закриття вкладки) і IndexedDB (справжня база даних у браузері для великих обсягів). Для старту вистачить localStorage.</p>
+
+<h2 id="s8">8. Доступність і DevTools</h2>
+<h3>Доступність (accessibility, a11y)</h3>
+<p>Приблизно 15% людей мають ті чи інші обмеження: слабкий зір, неможливість користуватись мишею, дальтонізм. Доступна сторінка працює для них — і, як бонус, для пошуковиків і для вас із зламаним тачпадом. Мінімум, який має бути завжди:</p>
+<ul>
+  <li>Семантичні теги замість <code>div</code>-супу (розділ 2).</li>
+  <li><code>alt</code> у кожної змістовної картинки (порожній <code>alt=""</code> — у декоративної).</li>
+  <li><code>&lt;label&gt;</code> у кожного поля форми.</li>
+  <li>Усе клікабельне — доступне з клавіатури (Tab, Enter). <code>&lt;button&gt;</code> і <code>&lt;a href&gt;</code> це вміють самі.</li>
+  <li>Видимий фокус: не пишіть <code>outline: none</code> без заміни.</li>
+  <li>Контраст тексту з фоном не менше 4.5:1 (перевірити можна в DevTools).</li>
+  <li>Атрибути ARIA — коли семантики не вистачає: <code>aria-label="Закрити"</code> для кнопки з однією іконкою, <code>aria-live="polite"</code> для області, що оновлюється.</li>
+</ul>
+
+<h3>DevTools: ваша операційна</h3>
+<p>F12 (або Cmd+Option+I на Mac) відкриває інструменти розробника. Головні вкладки:</p>
+<div class="table-wrap">
+<table>
+  <tr><th>Вкладка</th><th>Для чого</th></tr>
+  <tr><td><strong>Elements</strong></td><td>Живе DOM-дерево. Клік по елементу → його стилі праворуч; можна редагувати на льоту і дивитись box model.</td></tr>
+  <tr><td><strong>Console</strong></td><td>Помилки JS, <code>console.log</code>, і REPL — можна виконати будь-який код на сторінці.</td></tr>
+  <tr><td><strong>Network</strong></td><td>Кожен запит: метод, статус, час, заголовки, тіло відповіді. Перше місце для дебагу fetch.</td></tr>
+  <tr><td><strong>Sources</strong></td><td>Точки зупинки (breakpoints) в JS — крокувати код рядок за рядком.</td></tr>
+  <tr><td><strong>Application</strong></td><td>localStorage, cookies, IndexedDB, Service Workers.</td></tr>
+  <tr><td><strong>Lighthouse</strong></td><td>Аудит швидкості, доступності, SEO одним натисканням.</td></tr>
+</table>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Відкрий будь-який сайт, F12 → Elements. Знайди <code>&lt;h1&gt;</code>, двічі клікни на текст і зміни його. Подивись у панелі Styles, звідки прийшов колір.</li>
+    <li>У Console набери <code>document.querySelectorAll("a").length</code> — скільки посилань на сторінці? Потім <code>document.body.style.background = "pink"</code>.</li>
+    <li>Вкладка Network → фільтр Fetch/XHR → перезавантаж. Які API викликає сайт? Клікни на один і подивись Response.</li>
+    <li>Натисни Tab 10 разів на сторінці. Чи видно, де фокус? Чи можна дістатись головного меню без миші?</li>
+    <li>Lighthouse → Accessibility → Analyze. Прочитай, що він знайшов.</li>
+  </ol>
+</div>
+
+<h2 id="s9">9. Проєкт: список справ</h2>
+<p>Зберемо все в один застосунок. Три файли в одній теці. Він додає справи, позначає їх виконаними, видаляє, зберігає у localStorage і показує лічильник. Відкрити можна просто подвійним кліком по <code>index.html</code>.</p>
+
+<h3>index.html — скелет</h3>
+<pre><code class="language-html">&lt;!doctype html&gt;
+&lt;html lang="uk"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;title&gt;Список справ&lt;/title&gt;
+  &lt;link rel="stylesheet" href="style.css"&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;main class="app"&gt;
+    &lt;h1&gt;Список справ&lt;/h1&gt;
+
+    &lt;form id="todo-form" class="row"&gt;
+      &lt;label for="todo-input" class="visually-hidden"&gt;Нова справа&lt;/label&gt;
+      &lt;input id="todo-input" placeholder="Що треба зробити?" autocomplete="off" required&gt;
+      &lt;button type="submit"&gt;Додати&lt;/button&gt;
+    &lt;/form&gt;
+
+    &lt;ul id="todo-list" class="list" aria-live="polite"&gt;&lt;/ul&gt;
+
+    &lt;p class="status"&gt;Залишилось: &lt;strong id="count"&gt;0&lt;/strong&gt;&lt;/p&gt;
+  &lt;/main&gt;
+  &lt;script src="app.js" defer&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<p>Пояснення: форма з полем і кнопкою — стандартна пара; <code>required</code> не дасть додати порожню справу; <code>aria-live="polite"</code> змусить скрінрідер озвучити зміни списку; клас <code>visually-hidden</code> ховає підпис візуально, але лишає для скрінрідера.</p>
+
+<h3>style.css — одяг</h3>
+<pre><code class="language-css">*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --bg: #f7f7f5; --paper: #fff; --ink: #222; --muted: #777;
+  --accent: #1f6feb; --line: #e3e3e0; --radius: 10px;
+}
+
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+.app { max-width: 480px; margin: 40px auto; padding: 0 16px; }
+
+/* Flexbox: поле розтягується, кнопка фіксована */
+.row { display: flex; gap: 8px; }
+.row input { flex: 1; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); font: inherit; }
+.row button { padding: 10px 16px; border: 0; border-radius: var(--radius); background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+.row button:hover { filter: brightness(1.1); }
+
+.list { list-style: none; padding: 0; margin: 20px 0; }
+.list li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; margin-bottom: 8px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.list li span { flex: 1; }
+.list li.done span { text-decoration: line-through; color: var(--muted); }
+.list li .del { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; }
+.list li .del:hover { color: #cf222e; }
+
+.status { color: var(--muted); }
+
+/* сховати для очей, лишити для скрінрідера */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* видимий фокус з клавіатури */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }</code></pre>
+
+<h3>app.js — мозок</h3>
+<pre><code class="language-js">// ---------- Стан ----------
+const STORAGE_KEY = "todos:v1";
+
+/** @type {{id:number, text:string, done:boolean}[]} */
+let todos = load();
+
+// ---------- Елементи ----------
+const form = document.getElementById("todo-form");
+const input = document.getElementById("todo-input");
+const list = document.getElementById("todo-list");
+const count = document.getElementById("count");
+
+// ---------- Робота зі сховищем ----------
+function load() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? [];
+  } catch {
+    return [];
+  }
+}
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+}
+
+// ---------- Зміна стану (завжди через нові масиви) ----------
+function addTodo(text) {
+  todos = [...todos, { id: Date.now(), text, done: false }];
+  commit();
+}
+function toggleTodo(id) {
+  todos = todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+  commit();
+}
+function removeTodo(id) {
+  todos = todos.filter((t) => t.id !== id);
+  commit();
+}
+// одна точка: зберегти + перемалювати
+function commit() {
+  save();
+  render();
+}
+
+// ---------- Рендер: стан → DOM ----------
+function render() {
+  list.replaceChildren(); // очистити список
+
+  for (const todo of todos) {
+    const li = document.createElement("li");
+    li.dataset.id = todo.id;            // data-id="..." для делегування
+    if (todo.done) li.classList.add("done");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = todo.done;
+    checkbox.setAttribute("aria-label", `Виконано: ${todo.text}`);
+
+    const span = document.createElement("span");
+    span.textContent = todo.text;       // textContent, НЕ innerHTML — захист від XSS
+
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "×";
+    del.setAttribute("aria-label", `Видалити: ${todo.text}`);
+
+    li.append(checkbox, span, del);
+    list.append(li);
+  }
+
+  count.textContent = todos.filter((t) => !t.done).length;
+}
+
+// ---------- Події ----------
+form.addEventListener("submit", (e) => {
+  e.preventDefault();                   // не перезавантажувати сторінку
+  const text = input.value.trim();
+  if (!text) return;
+  addTodo(text);
+  input.value = "";
+  input.focus();
+});
+
+// делегування: один слухач на весь список
+list.addEventListener("click", (e) => {
+  const li = e.target.closest("li");
+  if (!li) return;
+  const id = Number(li.dataset.id);
+
+  if (e.target.matches("input[type=checkbox]")) toggleTodo(id);
+  if (e.target.matches(".del")) removeTodo(id);
+});
+
+// ---------- Старт ----------
+render();</code></pre>
+
+<p>Що тут важливо архітектурно, навіть у такому маленькому проєкті:</p>
+<ul>
+  <li><strong>Один стан — одна функція рендеру.</strong> Ми ніколи не правимо DOM «точково». Змінили масив <code>todos</code> → викликали <code>render()</code> → DOM перебудувався зі стану. Це та сама ідея, на якій побудований React: <em>UI = f(state)</em>.</li>
+  <li><strong>Імутабельність.</strong> <code>addTodo</code>, <code>toggleTodo</code>, <code>removeTodo</code> створюють нові масиви, а не змінюють старий. Це робить код передбачуваним і полегшує «відкат» чи історію.</li>
+  <li><strong>Делегування подій.</strong> Один <code>addEventListener</code> на <code>&lt;ul&gt;</code> замість трьох на кожен <code>&lt;li&gt;</code> — і працює для елементів, доданих пізніше.</li>
+  <li><strong>Безпека.</strong> <code>textContent</code> замість <code>innerHTML</code>. Спробуйте додати справу <code>&lt;b&gt;жирна&lt;/b&gt;</code> — теги покажуться як текст, а не спрацюють.</li>
+  <li><strong>Доступність.</strong> Підписи для чекбоксів і кнопок, <code>aria-live</code>, видимий фокус.</li>
+</ul>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Створи теку, поклади туди три файли, відкрий <code>index.html</code>. Додай кілька справ, перезавантаж сторінку — вони мають лишитись.</li>
+    <li>Відкрий DevTools → Application → Local Storage → подивись ключ <code>todos:v1</code>. Зміни значення вручну і перезавантаж.</li>
+    <li>Додай кнопку «Очистити виконані». Підказка: <code>todos = todos.filter(t =&gt; !t.done)</code>.</li>
+    <li>Додай фільтр «усі / активні / виконані». Підказка: ще одна змінна стану <code>filter</code>, і <code>render()</code> показує тільки відповідні.</li>
+    <li>Замість localStorage завантажуй початковий список через <code>fetch("https://jsonplaceholder.typicode.com/todos?_limit=5")</code>. Зверни увагу: поле там називається <code>title</code>, а не <code>text</code> — доведеться перетворити через <code>map</code>.</li>
+    <li>Пройди застосунок тільки з клавіатури: Tab, Enter, пробіл. Усе працює?</li>
+  </ol>
+</div>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Наш <code>render()</code> щоразу перебудовує весь список. Для 10 справ це непомітно, для 10 000 — гальмуватиме, бо кожна перебудова викликає layout і paint для всього <code>&lt;ul&gt;</code> (розділ 01, схема 5). Фреймворки на кшталт React вирішують це через <strong>virtual DOM</strong> і порівняння (diffing): вони обчислюють мінімальний набір змін і торкаються тільки потрібних вузлів. Але принцип «стан → рендер» той самий. Спробуйте самі оптимізувати <code>toggleTodo</code>, щоб він міняв клас лише на одному <code>&lt;li&gt;</code>, — і ви відчуєте, чому фреймворки взагалі з'явились.</p>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. За що відповідає кожна з трьох мов фронтенду?</summary><p>HTML — структура і зміст (скелет), CSS — зовнішній вигляд і розкладка (одяг), JavaScript — поведінка та інтерактивність (мозок).</p></details>
+  <details><summary>2. Чому &lt;button&gt; краще, ніж &lt;div onclick&gt;?</summary><p>Кнопка отримує фокус із Tab, спрацьовує на Enter і пробіл, оголошується скрінрідером як кнопка, і має стани disabled — усе безкоштовно. Для div це треба дописувати вручну.</p></details>
+  <details><summary>3. Що таке box-sizing: border-box і чому його вмикають глобально?</summary><p>З border-box задана width включає padding і border, тому елемент шириною 100% з padding не вилазить за батька. Це передбачуваніша модель, ніж стандартна content-box.</p></details>
+  <details><summary>4. Коли Flexbox, а коли Grid?</summary><p>Flexbox — для розташування вздовж однієї осі (панель кнопок, картка з іконкою і текстом). Grid — для двовимірних макетів (сторінка з шапкою, бічною панеллю і підвалом, галерея).</p></details>
+  <details><summary>5. Чому «Сів за столик» друкується раніше за «Кава готова»?</summary><p>await передає керування назад; таймер чекає у Web API; його колбек потрапить у чергу і виконається тільки коли стек викликів спорожніє. Синхронний console.log після виклику main() виконується одразу.</p></details>
+  <details><summary>6. Чим textContent відрізняється від innerHTML і чому це питання безпеки?</summary><p>textContent вставляє рядок як текст; innerHTML парсить його як HTML. Якщо в innerHTML потрапить введення користувача з тегами, це XSS-уразливість.</p></details>
+  <details><summary>7. Чому fetch не кидає помилку на статус 404?</summary><p>З точки зору fetch запит успішно виконався — сервер відповів. Помилкою вважається тільки мережевий збій. Тому треба перевіряти res.ok і кидати помилку самому.</p></details>
+  <details><summary>8. Що таке делегування подій?</summary><p>Замість слухача на кожному дочірньому елементі вішаємо один на батька і завдяки спливанню (bubbling) визначаємо через event.target, де саме клікнули. Працює і для елементів, доданих пізніше.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>HTML — структура, CSS — вигляд, JS — поведінка; не змішуйте ролі.</li>
+  <li>Семантичні теги і label/alt — це доступність, SEO і чистий код одночасно.</li>
+  <li>Box model: content → padding → border → margin; вмикайте <code>box-sizing: border-box</code> для всіх.</li>
+  <li>Flexbox — одна вісь, Grid — дві; медіазапити + viewport meta = адаптивність; CSS-змінні для тем.</li>
+  <li><code>const</code> за замовчуванням, <code>let</code> коли треба міняти, <code>var</code> ніколи.</li>
+  <li>map/filter/find/reduce + деструктуризація + spread — щоденні інструменти; повертайте нові структури, не мутуйте старі.</li>
+  <li>async/await і цикл подій: довге чекання не блокує сторінку, але результат приходить пізніше.</li>
+  <li>DOM — дерево; querySelector шукає, textContent змінює безпечно, addEventListener слухає, делегування економить слухачі.</li>
+  <li>fetch: перевіряйте <code>res.ok</code>, обгортайте в try/catch, пам'ятайте про CORS.</li>
+  <li>localStorage — для дрібниць, не для секретів; тільки рядки, тому JSON.stringify/parse.</li>
+  <li>Стан → render(): змінили дані — перемалювали UI. Так працюють і ваш todo, і React.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Learn_web_development" target="_blank" rel="noopener">MDN — Learn web development</a> — офіційний структурований курс з HTML, CSS і JS від Mozilla; найкращий «підручник» після цього розділу.</li>
+    <li><a href="https://uk.javascript.info/" target="_blank" rel="noopener">javascript.info українською</a> — найповніший підручник з сучасного JavaScript; розділи про типи, функції, Promise/async і DOM обов'язкові.</li>
+    <li><a href="https://css-tricks.com/snippets/css/a-guide-to-flexbox/" target="_blank" rel="noopener">CSS-Tricks — A Complete Guide to Flexbox</a> — візуальний довідник усіх властивостей Flexbox; тримайте відкритим під час верстки.</li>
+    <li><a href="https://css-tricks.com/snippets/css/complete-guide-grid/" target="_blank" rel="noopener">CSS-Tricks — A Complete Guide to Grid</a> — те саме для Grid, з прикладами grid-template-areas.</li>
+    <li><a href="https://web.dev/learn/css" target="_blank" rel="noopener">web.dev — Learn CSS</a> — курс від Google: box model, каскад, специфічність, розкладки, з інтерактивними прикладами.</li>
+    <li><a href="https://web.dev/learn/accessibility" target="_blank" rel="noopener">web.dev — Learn Accessibility</a> — системний курс з доступності: семантика, фокус, ARIA, контраст.</li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch" target="_blank" rel="noopener">MDN — Using the Fetch API</a> — довідник fetch з обробкою помилок, заголовками і тілом запиту.</li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage" target="_blank" rel="noopener">MDN — Window.localStorage</a> — документація localStorage і його обмежень.</li>
+    <li><a href="https://developer.chrome.com/docs/devtools" target="_blank" rel="noopener">Chrome DevTools — документація</a> — офіційні гайди по кожній вкладці DevTools.</li>
+    <li><a href="https://frontendmasters.com/bootcamp/" target="_blank" rel="noopener">Frontend Masters — безкоштовний Bootcamp</a> — 21 година відео з HTML, CSS, JS для абсолютних новачків.</li>
+    <li><a href="https://www.freecodecamp.org/learn/2022/responsive-web-design/" target="_blank" rel="noopener">freeCodeCamp — Responsive Web Design</a> — безкоштовний практичний курс з сертифікатом; сотні маленьких вправ.</li>
+    <li><a href="https://roadmap.sh/frontend" target="_blank" rel="noopener">roadmap.sh — Frontend</a> — куди йти далі після основ.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 02</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

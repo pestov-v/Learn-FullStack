@@ -1,0 +1,885 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05. Бази даних: SQL і PostgreSQL — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 05 · <span class="level-badge level-1">Новачок</span></div>
+  <h1>Бази даних: SQL і PostgreSQL</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, як реляційна база зберігає дані у зв'язаних таблицях, навчитеся писати SQL-запити, читати план виконання, захищатися від SQL-ін'єкцій і підключите PostgreSQL до свого Node.js API.</p>
+  <div class="meta"><span>⏱ ~120 хв</span><span>📚 Передумови: розділ 04</span><span>🎯 Ціль: спроєктувати схему блогу і зробити до неї запити</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Навіщо база даних, а не файл</a></li>
+    <li><a href="#s2">Реляційна модель: таблиці, ключі, зв'язки</a></li>
+    <li><a href="#s3">Нормалізація простими словами</a></li>
+    <li><a href="#s4">SQL: створити, вставити, вибрати, оновити, видалити, з'єднати</a></li>
+    <li><a href="#s5">Індекси: як база шукає швидко</a></li>
+    <li><a href="#s6">Транзакції та ACID</a></li>
+    <li><a href="#s7">PostgreSQL на практиці: Docker, psql, Node, ORM, міграції</a></li>
+    <li><a href="#s8">Проєктуємо схему блогу</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви, що всі свої малюнки, листівки й фотографії ти складаєш в одну велику коробку. Спершу зручно: кинув — і забув. Але коли треба знайти малюнок кота, який ти намалював минулого літа, доведеться перерити все. А тепер уяви <b>шафу з підписаними шухлядами</b>: «Малюнки», «Листівки», «Фото», і всередині кожної — картки в алфавітному порядку з датою. Знайти кота — секунда. І ще: на кожній картці записано, до якого альбому вона належить, тож ти ніколи не переплутаєш. Ця шафа — <b>база даних</b>. Шухляди — <b>таблиці</b>. Картки — <b>рядки</b>. Підписи «до якого альбому» — <b>зв'язки</b>. А мова, якою ти просиш шафу «дай усі малюнки з котами за минуле літо» — <b>SQL</b>.</p>
+</div>
+
+<h2 id="s1">1. Навіщо база даних, а не файл</h2>
+<p>У розділі 04 наші нотатки жили в масиві в пам'яті. Перший крок до «справжнього» зберігання, який спадає на думку новачку: записувати їх у файл <code>notes.json</code>. Це навіть працює — до першої тисячі користувачів. А потім починаються проблеми:</p>
+<ul>
+  <li><b>Пошук.</b> Щоб знайти одну нотатку серед мільйона, треба прочитати весь файл і перебрати все. База даних знаходить її за кілька мілісекунд завдяки індексам.</li>
+  <li><b>Одночасний доступ.</b> Два запити одночасно змінюють файл: один читає старий вміст, другий пише новий — зміни першого зникають. База даних керує паралельним доступом і гарантує, що жоден запис не загубиться.</li>
+  <li><b>Часткова зміна.</b> Оновити одне поле однієї нотатки = переписати весь файл. База змінює тільки потрібний рядок.</li>
+  <li><b>Надійність.</b> Світло вимкнули посеред запису — файл пошкоджено, дані втрачено. База даних веде журнал (WAL — write-ahead log) і після перезапуску відновлюється у консистентний стан.</li>
+  <li><b>Зв'язки.</b> Нотатка належить користувачу, має теги, коментарі. У JSON ви або дублюєте дані, або пишете власну систему посилань. У реляційній базі зв'язки — вбудована функція.</li>
+  <li><b>Мова запитів.</b> «Топ-10 користувачів за кількістю нотаток за останній місяць» — один рядок SQL проти сторінки JavaScript.</li>
+</ul>
+<p>Система керування базами даних (СКБД, DBMS — Database Management System) — це програма, яка бере на себе все перелічене. Ми працюватимемо з <b>PostgreSQL</b> — відкритою, безкоштовною, найпотужнішою реляційною СКБД, яка сьогодні є типовим вибором для нових проєктів. Інші популярні: MySQL/MariaDB (класика веб-хостингів), SQLite (вбудована база в одному файлі — ідеальна для мобільних застосунків і прототипів), Microsoft SQL Server і Oracle (корпоративний світ).</p>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>База даних — єдина частина системи, яку не можна «просто перезапустити». Код можна переписати, сервер — замінити, а втрачені дані користувачів не повернути. Тому розуміння того, як база зберігає, шукає і захищає дані, — не «бекендна деталь», а фундамент. Більшість катастроф у продакшені (втрачені замовлення, повільні сторінки, зламані акаунти) пов'язані з базою даних.</p>
+</div>
+
+<h2 id="s2">2. Реляційна модель: таблиці, ключі, зв'язки</h2>
+<p>Слово «реляційна» походить від математичного терміна <i>relation</i> (відношення), а не від «зв'язок», хоч зв'язки там теж є. Практично реляційна база — це набір <b>таблиць</b> (tables). Кожна таблиця має:</p>
+<ul>
+  <li><b>колонки</b> (columns) — назви полів із фіксованим <b>типом даних</b> (data type): текст, число, дата, логічне значення;</li>
+  <li><b>рядки</b> (rows, записи) — конкретні дані, по одному значенню для кожної колонки;</li>
+  <li><b>первинний ключ</b> (primary key, PK) — колонка (або кілька), значення якої унікально ідентифікує рядок. Зазвичай це <code>id</code>;</li>
+  <li><b>зовнішній ключ</b> (foreign key, FK) — колонка, яка містить первинний ключ рядка з <i>іншої</i> таблиці. Так і виникають зв'язки.</li>
+</ul>
+
+<figure>
+  <svg viewBox="0 0 760 320" role="img" aria-label="Дві таблиці users і posts, поле posts.user_id посилається на users.id як зовнішній ключ">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="300" height="34" rx="8" class="blue"/>
+    <text x="170" y="43" text-anchor="middle" class="bold">users</text>
+    <rect x="20" y="54" width="300" height="28" class="box-fill"/>
+    <text x="40" y="73" class="mono bold">id (PK)</text>
+    <text x="130" y="73" class="mono bold">email</text>
+    <text x="250" y="73" class="mono bold">name</text>
+    <rect x="20" y="82" width="300" height="28" class="box-fill"/>
+    <text x="40" y="101" class="mono">1</text>
+    <text x="130" y="101" class="mono">ann@mail.ua</text>
+    <text x="250" y="101" class="mono">Анна</text>
+    <rect x="20" y="110" width="300" height="28" class="box-fill"/>
+    <text x="40" y="129" class="mono">2</text>
+    <text x="130" y="129" class="mono">bo@mail.ua</text>
+    <text x="250" y="129" class="mono">Богдан</text>
+
+    <rect x="400" y="20" width="340" height="34" rx="8" class="green"/>
+    <text x="570" y="43" text-anchor="middle" class="bold">posts</text>
+    <rect x="400" y="54" width="340" height="28" class="box-fill"/>
+    <text x="415" y="73" class="mono bold">id (PK)</text>
+    <text x="490" y="73" class="mono bold">user_id (FK)</text>
+    <text x="610" y="73" class="mono bold">title</text>
+    <rect x="400" y="82" width="340" height="28" class="box-fill"/>
+    <text x="415" y="101" class="mono">10</text>
+    <text x="490" y="101" class="mono">1</text>
+    <text x="610" y="101" class="mono">Про котів</text>
+    <rect x="400" y="110" width="340" height="28" class="box-fill"/>
+    <text x="415" y="129" class="mono">11</text>
+    <text x="490" y="129" class="mono">1</text>
+    <text x="610" y="129" class="mono">Про собак</text>
+    <rect x="400" y="138" width="340" height="28" class="box-fill"/>
+    <text x="415" y="157" class="mono">12</text>
+    <text x="490" y="157" class="mono">2</text>
+    <text x="610" y="157" class="mono">Про SQL</text>
+
+    <path d="M500 96 C 380 96, 380 96, 55 96" class="arrow"/>
+    <path d="M500 124 C 380 124, 380 110, 55 100" class="arrow dashed"/>
+    <path d="M500 152 C 380 152, 380 140, 55 128" class="arrow"/>
+
+    <rect x="20" y="200" width="720" height="100" rx="12" class="accent"/>
+    <text x="40" y="226" class="small bold">Правило зовнішнього ключа (referential integrity):</text>
+    <text x="40" y="248" class="small">• у posts.user_id може стояти лише значення, яке існує в users.id (база не дасть записати 99);</text>
+    <text x="40" y="268" class="small">• не можна видалити користувача 1, поки в нього є пости — або база відмовить, або каскадно видалить їх</text>
+    <text x="40" y="288" class="small">  (ON DELETE CASCADE), або обнулить user_id (ON DELETE SET NULL) — ви обираєте при створенні таблиці.</text>
+  </svg>
+  <figcaption>Зовнішній ключ <code>posts.user_id</code> «показує пальцем» на первинний ключ <code>users.id</code>. Так один користувач має багато постів, а кожен пост — рівно одного автора.</figcaption>
+</figure>
+
+<h3>Типи даних PostgreSQL, які ви використовуватимете щодня</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Тип</th><th>Що зберігає</th><th>Приклад</th></tr></thead>
+  <tbody>
+    <tr><td><code>integer</code>, <code>bigint</code></td><td>Цілі числа (4 і 8 байтів)</td><td>кількість, id</td></tr>
+    <tr><td><code>serial</code> / <code>generated always as identity</code></td><td>Автоінкремент для id (identity — сучасний спосіб)</td><td><code>id integer generated always as identity primary key</code></td></tr>
+    <tr><td><code>uuid</code></td><td>128-бітний унікальний ідентифікатор</td><td>id, коли не хочете передбачуваних номерів</td></tr>
+    <tr><td><code>numeric(10,2)</code></td><td>Точні десяткові — для грошей (НЕ <code>float</code>!)</td><td>ціна 199.99</td></tr>
+    <tr><td><code>text</code>, <code>varchar(n)</code></td><td>Рядки; в Postgres <code>text</code> не повільніший</td><td>заголовок, email</td></tr>
+    <tr><td><code>boolean</code></td><td>true / false</td><td>done, is_published</td></tr>
+    <tr><td><code>timestamptz</code></td><td>Момент часу з часовою зоною (завжди обирайте <code>tz</code>-версію)</td><td>created_at</td></tr>
+    <tr><td><code>date</code></td><td>Лише дата</td><td>дата народження</td></tr>
+    <tr><td><code>jsonb</code></td><td>Документ JSON у бінарному вигляді з індексацією</td><td>налаштування, метадані</td></tr>
+    <tr><td><code>text[]</code></td><td>Масив</td><td>теги (для простих випадків)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Три види зв'язків</h3>
+<p>Зв'язки між таблицями бувають тільки трьох видів, і всі вони будуються на зовнішніх ключах:</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Три типи зв'язків: один до одного, один до багатьох, багато до багатьох через проміжну таблицю">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="30" class="bold">1 : 1 — один до одного</text>
+    <rect x="20" y="40" width="130" height="44" rx="10" class="blue"/>
+    <text x="85" y="66" text-anchor="middle" class="mono">users</text>
+    <path d="M150 62 L260 62" class="arrow"/>
+    <text x="205" y="52" text-anchor="middle" class="small">1 — 1</text>
+    <rect x="260" y="40" width="150" height="44" rx="10" class="green"/>
+    <text x="335" y="58" text-anchor="middle" class="mono">user_profiles</text>
+    <text x="335" y="76" text-anchor="middle" class="mono small">user_id FK UNIQUE</text>
+    <text x="430" y="58" class="small">Профіль із біографією та аватаром.</text>
+    <text x="430" y="76" class="small">FK з UNIQUE — не більше одного профілю.</text>
+
+    <text x="20" y="130" class="bold">1 : N — один до багатьох (найчастіший)</text>
+    <rect x="20" y="140" width="130" height="44" rx="10" class="blue"/>
+    <text x="85" y="166" text-anchor="middle" class="mono">users</text>
+    <path d="M150 162 L260 162" class="arrow"/>
+    <text x="205" y="152" text-anchor="middle" class="small">1 — N</text>
+    <rect x="260" y="140" width="150" height="44" rx="10" class="green"/>
+    <text x="335" y="158" text-anchor="middle" class="mono">posts</text>
+    <text x="335" y="176" text-anchor="middle" class="mono small">user_id FK</text>
+    <text x="430" y="158" class="small">Автор має багато постів, пост — одного</text>
+    <text x="430" y="176" class="small">автора. FK стоїть на стороні «багато».</text>
+
+    <text x="20" y="230" class="bold">N : M — багато до багатьох (через проміжну таблицю)</text>
+    <rect x="20" y="245" width="130" height="44" rx="10" class="green"/>
+    <text x="85" y="271" text-anchor="middle" class="mono">posts</text>
+    <path d="M150 267 L230 267" class="arrow"/>
+    <rect x="230" y="240" width="170" height="54" rx="10" class="purple"/>
+    <text x="315" y="260" text-anchor="middle" class="mono">post_tags</text>
+    <text x="315" y="278" text-anchor="middle" class="mono small">post_id FK, tag_id FK</text>
+    <path d="M400 267 L480 267" class="arrow" style="marker-start:url(#arr)"/>
+    <rect x="480" y="245" width="130" height="44" rx="10" class="accent"/>
+    <text x="545" y="271" text-anchor="middle" class="mono">tags</text>
+    <text x="20" y="318" class="small">Пост має багато тегів, тег — на багатьох постах. Прямого FK не буває — потрібна join-таблиця з двома FK і складеним PK (post_id, tag_id).</text>
+  </svg>
+  <figcaption>1:1 — FK з обмеженням UNIQUE; 1:N — FK на стороні «багато»; N:M — окрема таблиця-зв'язка з двома FK.</figcaption>
+</figure>
+
+<h2 id="s3">3. Нормалізація простими словами</h2>
+<p><b>Нормалізація</b> (normalization) — набір правил, як розкладати дані по таблицях, щоб <b>кожен факт зберігався рівно один раз</b>. Уявіть, що в таблиці <code>posts</code> у кожному рядку записано ім'я та email автора. Автор змінив email — треба оновити тисячу рядків, а якщо один пропустити, база «бреше». Це називається <b>аномалією оновлення</b>. Нормалізація її прибирає.</p>
+<p>Класичних «нормальних форм» багато, але на практиці досить трьох:</p>
+<ol>
+  <li><b>1НФ (перша нормальна форма):</b> у кожній комірці — одне атомарне значення, без списків. Погано: колонка <code>tags = "sql, postgres, backend"</code>. Добре: окрема таблиця <code>tags</code> і зв'язок N:M. (Postgres дозволяє масиви й JSON, і це свідоме відхилення від 1НФ, яке інколи виправдане, — але не за замовчуванням.)</li>
+  <li><b>2НФ:</b> кожна не-ключова колонка залежить від <i>усього</i> первинного ключа, а не від його частини. Актуально для складених ключів: у таблиці <code>order_items (order_id, product_id, quantity, product_name)</code> поле <code>product_name</code> залежить лише від <code>product_id</code> — його треба винести в <code>products</code>.</li>
+  <li><b>3НФ:</b> не-ключові колонки не залежать одна від одної. У <code>users (id, city, country)</code> країна залежить від міста, а не від користувача — винести в <code>cities</code>. Гасло 3НФ: «кожне поле залежить від ключа, від усього ключа й ні від чого, крім ключа».</li>
+</ol>
+<p><b>Коли денормалізувати?</b> Коли ви точно виміряли, що зв'язування таблиць (JOIN) у гарячому запиті — вузьке місце, і готові підтримувати дублікат. Типові приклади: лічильник <code>comments_count</code> у таблиці <code>posts</code> (щоб не рахувати щоразу), <code>total_amount</code> у замовленні (щоб не перераховувати з позицій і щоб історична сума не змінилась при зміні цін). Правило: <b>спочатку нормалізуйте, потім денормалізуйте свідомо і з планом оновлення дубліката</b> (тригер, транзакція або фонова задача).</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>Одна гігантська таблиця.</b> Новачки кладуть все в <code>posts</code>: ім'я автора, його email, назви тегів через кому. Перша ж зміна email перетворюється на бомбу.</li>
+    <li><b>Перенормалізація.</b> Протилежна крайність: таблиця <code>user_first_names</code>, <code>user_last_names</code>. Якщо дані завжди змінюються разом і не дублюються — вони живуть в одній таблиці.</li>
+    <li><b><code>float</code> для грошей.</b> <code>0.1 + 0.2 = 0.30000000000000004</code>. Тільки <code>numeric</code> або цілі копійки в <code>bigint</code>.</li>
+    <li><b><code>timestamp</code> без <code>tz</code>.</b> Сервер у Києві, користувач у Варшаві, база в Франкфурті — час «пливе». Завжди <code>timestamptz</code> і зберігання в UTC.</li>
+  </ul>
+</div>
+
+<h2 id="s4">4. SQL: створити, вставити, вибрати, оновити, видалити, з'єднати</h2>
+<p><b>SQL</b> (Structured Query Language) — декларативна мова: ви описуєте, <i>що</i> хочете отримати, а база сама вирішує, <i>як</i> це зробити. SQL нечутливий до регістру ключових слів, але за традицією їх пишуть великими, а назви таблиць і колонок — малими через <code>snake_case</code>.</p>
+
+<h3>Створення таблиць (DDL)</h3>
+<pre><code class="language-sql">-- Мова визначення даних (DDL — Data Definition Language)
+CREATE TABLE users (
+  id          integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email       text NOT NULL UNIQUE,            -- обмеження: обов'язкове і унікальне
+  name        text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE posts (
+  id          integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id     integer NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- зовнішній ключ
+  title       text NOT NULL CHECK (length(title) &gt; 0),               -- бізнес-правило на рівні бази
+  body        text NOT NULL DEFAULT '',
+  published   boolean NOT NULL DEFAULT false,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);</code></pre>
+
+<h3>Вставка, вибірка, оновлення, видалення (DML)</h3>
+<pre><code class="language-sql">-- Мова маніпуляції даними (DML — Data Manipulation Language)
+INSERT INTO users (email, name) VALUES
+  ('ann@mail.ua', 'Анна'),
+  ('bo@mail.ua',  'Богдан')
+RETURNING id;   -- Postgres-фішка: одразу повернути згенеровані id
+
+INSERT INTO posts (user_id, title, body, published) VALUES
+  (1, 'Про котів', 'Коти — це...', true),
+  (1, 'Про собак', 'Собаки — це...', false),
+  (2, 'Про SQL',   'SQL — це...', true);
+
+-- SELECT: які колонки, з якої таблиці, за якою умовою, в якому порядку, скільки
+SELECT id, title, created_at
+FROM posts
+WHERE published = true AND user_id = 1     -- фільтр
+ORDER BY created_at DESC                    -- сортування: найновіші зверху
+LIMIT 10 OFFSET 0;                          -- пагінація: перша сторінка по 10
+
+-- Оператори у WHERE
+SELECT * FROM posts WHERE title ILIKE '%кот%';          -- пошук без урахування регістру
+SELECT * FROM posts WHERE id IN (1, 2, 3);
+SELECT * FROM posts WHERE created_at &gt;= now() - interval '7 days';
+SELECT * FROM users WHERE name IS NULL;                   -- NULL порівнюють тільки через IS
+
+-- UPDATE: ЗАВЖДИ з WHERE, інакше оновите всі рядки
+UPDATE posts SET published = true, title = 'Про собак (оновлено)'
+WHERE id = 2
+RETURNING *;
+
+-- DELETE: та сама історія з WHERE
+DELETE FROM posts WHERE id = 2;</code></pre>
+
+<h3>Агрегації: GROUP BY і HAVING</h3>
+<pre><code class="language-sql">-- Скільки постів у кожного користувача
+SELECT user_id, count(*) AS posts_count, max(created_at) AS last_post_at
+FROM posts
+GROUP BY user_id            -- згорнути рядки в групи за user_id
+HAVING count(*) &gt;= 2        -- фільтр ПІСЛЯ групування (WHERE працює ДО)
+ORDER BY posts_count DESC;
+
+-- Інші агрегатні функції: sum(), avg(), min(), max(), count(DISTINCT col), string_agg()</code></pre>
+
+<h3>JOIN — з'єднання таблиць</h3>
+<p>Найважливіша операція реляційної бази. <code>JOIN</code> «склеює» рядки двох таблиць за умовою — зазвичай рівністю FK і PK.</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Види JOIN у вигляді таблиць: INNER JOIN залишає тільки збіги, LEFT JOIN — усі рядки лівої таблиці з NULL там, де немає збігів">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="28" class="bold">users (ліва)</text>
+    <rect x="20" y="36" width="150" height="24" class="blue"/><text x="30" y="53" class="mono small">1 · Анна</text>
+    <rect x="20" y="60" width="150" height="24" class="blue"/><text x="30" y="77" class="mono small">2 · Богдан</text>
+    <rect x="20" y="84" width="150" height="24" class="blue"/><text x="30" y="101" class="mono small">3 · Віра (без постів)</text>
+
+    <text x="200" y="28" class="bold">posts (права)</text>
+    <rect x="200" y="36" width="170" height="24" class="green"/><text x="210" y="53" class="mono small">10 · user 1 · Про котів</text>
+    <rect x="200" y="60" width="170" height="24" class="green"/><text x="210" y="77" class="mono small">11 · user 1 · Про собак</text>
+    <rect x="200" y="84" width="170" height="24" class="green"/><text x="210" y="101" class="mono small">12 · user 2 · Про SQL</text>
+
+    <path d="M380 70 L430 70" class="arrow"/>
+
+    <text x="440" y="28" class="bold">INNER JOIN — тільки збіги</text>
+    <rect x="440" y="36" width="300" height="24" class="accent"/><text x="450" y="53" class="mono small">Анна   · Про котів</text>
+    <rect x="440" y="60" width="300" height="24" class="accent"/><text x="450" y="77" class="mono small">Анна   · Про собак</text>
+    <rect x="440" y="84" width="300" height="24" class="accent"/><text x="450" y="101" class="mono small">Богдан · Про SQL</text>
+    <text x="440" y="128" class="small muted">Віри немає — у неї немає постів</text>
+
+    <text x="440" y="170" class="bold">LEFT JOIN — усі з лівої + збіги</text>
+    <rect x="440" y="178" width="300" height="24" class="accent"/><text x="450" y="195" class="mono small">Анна   · Про котів</text>
+    <rect x="440" y="202" width="300" height="24" class="accent"/><text x="450" y="219" class="mono small">Анна   · Про собак</text>
+    <rect x="440" y="226" width="300" height="24" class="accent"/><text x="450" y="243" class="mono small">Богдан · Про SQL</text>
+    <rect x="440" y="250" width="300" height="24" class="red"/><text x="450" y="267" class="mono small">Віра   · NULL</text>
+    <text x="440" y="292" class="small muted">Віра є, а замість поста — NULL</text>
+
+    <rect x="20" y="150" width="350" height="150" rx="12" class="box-fill"/>
+    <text x="35" y="176" class="small bold">Умова з'єднання: ON users.id = posts.user_id</text>
+    <text x="35" y="200" class="small">• INNER JOIN — «покажи авторів, у яких є пости»</text>
+    <text x="35" y="220" class="small">• LEFT JOIN — «покажи всіх авторів і їхні пости, якщо є»</text>
+    <text x="35" y="240" class="small">• RIGHT JOIN — те саме дзеркально (рідко)</text>
+    <text x="35" y="260" class="small">• FULL JOIN — усі з обох боків (рідко)</text>
+    <text x="35" y="280" class="small">• LEFT JOIN + WHERE p.id IS NULL — «автори БЕЗ постів»</text>
+  </svg>
+  <figcaption>INNER JOIN відкидає рядки без пари, LEFT JOIN зберігає всі рядки лівої таблиці й підставляє NULL там, де пари немає.</figcaption>
+</figure>
+
+<pre><code class="language-sql">-- Пости з іменами авторів (псевдоніми u і p скорочують запис)
+SELECT p.id, p.title, u.name AS author, u.email
+FROM posts AS p
+INNER JOIN users AS u ON u.id = p.user_id
+WHERE p.published = true
+ORDER BY p.created_at DESC;
+
+-- Усі користувачі та кількість їхніх постів (включно з тими, у кого 0)
+SELECT u.name, count(p.id) AS posts_count
+FROM users AS u
+LEFT JOIN posts AS p ON p.user_id = u.id
+GROUP BY u.id, u.name
+ORDER BY posts_count DESC;
+
+-- Підзапит (subquery): користувачі, які мають хоча б один опублікований пост
+SELECT name FROM users
+WHERE id IN (SELECT user_id FROM posts WHERE published = true);
+
+-- Те саме через EXISTS — часто швидше на великих таблицях
+SELECT name FROM users u
+WHERE EXISTS (SELECT 1 FROM posts p WHERE p.user_id = u.id AND p.published);
+
+-- CTE (Common Table Expression) — "тимчасова таблиця" для читабельності
+WITH active_authors AS (
+  SELECT user_id, count(*) AS cnt FROM posts GROUP BY user_id HAVING count(*) &gt; 1
+)
+SELECT u.name, a.cnt
+FROM active_authors a
+JOIN users u ON u.id = a.user_id;</code></pre>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Відкрийте <a href="https://sqlbolt.com/" target="_blank" rel="noopener">SQLBolt</a> і пройдіть уроки 1–12 — це інтерактивний тренажер SELECT/JOIN/GROUP BY прямо в браузері, без установки.</li>
+    <li>Потім <a href="https://pgexercises.com/" target="_blank" rel="noopener">PGExercises</a> — задачі саме на PostgreSQL, від простих до віконних функцій.</li>
+    <li>Запустіть Postgres із розділу 7 нижче, виконайте <code>CREATE TABLE</code> та <code>INSERT</code> звідси й напишіть запит: «три найактивніші автори за останні 30 днів, з кількістю опублікованих постів і датою останнього».</li>
+  </ol>
+</div>
+
+<h2 id="s5">5. Індекси: як база шукає швидко</h2>
+<p>Без індексу запит <code>SELECT * FROM users WHERE email = 'ann@mail.ua'</code> змушує базу прочитати <b>всі</b> рядки таблиці й перевірити кожен. Це називається <b>послідовне сканування</b> (sequential scan) — у мільйонній таблиці це секунди. <b>Індекс</b> (index) — окрема структура даних, яка зберігає значення колонки у відсортованому вигляді разом із «адресами» рядків. Як алфавітний покажчик у кінці книги: замість гортати 500 сторінок, ви дивитесь у покажчик і йдете одразу на сторінку 312.</p>
+<p>Стандартний індекс у PostgreSQL — <b>B-tree</b> (збалансоване дерево). Уявіть шафу з шухлядами, на кожній написано діапазон: «А–Ж», «З–О», «П–Я». Усередині — знову шухляди з вужчими діапазонами. Щоб знайти «Кузьменко», ви відкриваєте 3–4 шухляди замість перегляду всіх карток. Кожен «рівень» дерева зменшує область пошуку в сотні разів, тому в дереві з мільйона записів достатньо 3–4 кроків.</p>
+
+<figure>
+  <svg viewBox="0 0 760 320" role="img" aria-label="B-tree індекс: кореневий вузол з діапазонами, проміжні вузли, листки з посиланнями на рядки таблиці; шлях пошуку значення 42 виділено">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="290" y="20" width="180" height="40" rx="10" class="purple"/>
+    <text x="380" y="45" text-anchor="middle" class="mono">корінь: &lt;30 | 30–60 | &gt;60</text>
+
+    <path d="M330 60 L150 110" class="arrow"/>
+    <path d="M380 60 L380 110" class="arrow" style="stroke-width:3"/>
+    <path d="M430 60 L610 110" class="arrow"/>
+
+    <rect x="70" y="110" width="160" height="40" rx="10" class="blue"/>
+    <text x="150" y="135" text-anchor="middle" class="mono">&lt;10 | 10–20 | 20–30</text>
+    <rect x="300" y="110" width="160" height="40" rx="10" class="accent"/>
+    <text x="380" y="135" text-anchor="middle" class="mono">30–40 | 40–50 | 50–60</text>
+    <rect x="530" y="110" width="160" height="40" rx="10" class="blue"/>
+    <text x="610" y="135" text-anchor="middle" class="mono">60–70 | 70–80 | &gt;80</text>
+
+    <path d="M330 150 L300 200" class="arrow"/>
+    <path d="M380 150 L380 200" class="arrow" style="stroke-width:3"/>
+    <path d="M430 150 L460 200" class="arrow"/>
+
+    <rect x="250" y="200" width="90" height="36" rx="8" class="green"/>
+    <text x="295" y="223" text-anchor="middle" class="mono">31 35 38</text>
+    <rect x="340" y="200" width="90" height="36" rx="8" class="accent"/>
+    <text x="385" y="223" text-anchor="middle" class="mono">41 42 47</text>
+    <rect x="430" y="200" width="90" height="36" rx="8" class="green"/>
+    <text x="475" y="223" text-anchor="middle" class="mono">52 55 59</text>
+    <text x="150" y="223" class="small muted">... інші листки ...</text>
+    <text x="560" y="223" class="small muted">... інші листки ...</text>
+
+    <path d="M385 236 L385 270" class="arrow" style="stroke-width:3"/>
+    <rect x="250" y="270" width="270" height="36" rx="8" class="box-fill"/>
+    <text x="385" y="293" text-anchor="middle" class="mono">рядок таблиці: id=42, email=..., name=...</text>
+
+    <text x="20" y="300" class="small">Пошук id=42: 3 кроки замість 1 000 000 порівнянь.</text>
+  </svg>
+  <figcaption>B-tree: на кожному рівні пошук звужується в рази. Листки відсортовані, тому індекс допомагає і для <code>ORDER BY</code>, і для діапазонів (<code>BETWEEN</code>, <code>&gt;</code>).</figcaption>
+</figure>
+
+<pre><code class="language-sql">-- Створити індекс (PK і UNIQUE створюють індекси автоматично)
+CREATE INDEX posts_user_id_idx ON posts (user_id);          -- для JOIN і WHERE user_id = ?
+CREATE INDEX posts_published_created_idx ON posts (published, created_at DESC); -- складений: під конкретний запит
+CREATE INDEX posts_title_trgm_idx ON posts USING gin (title gin_trgm_ops);     -- для ILIKE '%кот%' (розширення pg_trgm)
+
+-- Подивитись план виконання: чи використовується індекс?
+EXPLAIN ANALYZE
+SELECT * FROM posts WHERE user_id = 1 AND published ORDER BY created_at DESC LIMIT 10;
+-- Погано:  Seq Scan on posts  (cost=0.00..25000 rows=...)   ← читає всю таблицю
+-- Добре:   Index Scan using posts_user_id_idx on posts       ← пішов по індексу</code></pre>
+<p><b>Коли створювати індекс:</b> на зовнішні ключі (Postgres не робить це автоматично!), на колонки з <code>WHERE</code> у частих запитах, на колонки сортування в пагінації, на поля пошуку. <b>Чому не на все:</b> кожен індекс — це додаткова структура, яку треба оновлювати при кожному <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code>. Десять індексів на таблиці робить запис у неї в кілька разів повільнішим і займає диск. Індекс на колонці з двома значеннями (<code>published</code> окремо) майже марний — база все одно прочитає половину таблиці. Правило: <b>індекс під конкретний повільний запит, підтверджений через <code>EXPLAIN ANALYZE</code></b>.</p>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Дев'ять із десяти «сайт гальмує» у стартапах — це один запит без індексу, який на тестових 100 рядках літав, а на 5 мільйонах у продакшені читає всю таблицю. Уміння відкрити <code>EXPLAIN ANALYZE</code>, побачити <code>Seq Scan</code> і додати правильний індекс — навичка, за яку платять. Сайт <a href="https://use-the-index-luke.com/" target="_blank" rel="noopener">Use The Index, Luke</a> — найкраща безкоштовна книга про це.</p>
+</div>
+
+<h2 id="s6">6. Транзакції та ACID</h2>
+<p>Класичний приклад: переказ 100 грн з рахунку Анни на рахунок Богдана. Це <i>дві</i> операції: відняти 100 у Анни, додати 100 Богдану. Що, якщо після першої сервер впаде? Гроші зникнуть. Що, якщо в цей же момент інший запит читає баланси? Побачить стан, якого «не було». <b>Транзакція</b> (transaction) — це група операцій, яка виконується як одна: або всі, або жодна.</p>
+<pre><code class="language-sql">BEGIN;                                                   -- почати транзакцію
+UPDATE accounts SET balance = balance - 100 WHERE id = 1; -- Анна
+UPDATE accounts SET balance = balance + 100 WHERE id = 2; -- Богдан
+-- Перевірка бізнес-правила прямо в базі:
+-- якщо баланс Анни став від'ємним, CHECK (balance &gt;= 0) на таблиці кине помилку
+COMMIT;                                                  -- зафіксувати все разом
+-- або ROLLBACK; — відкотити все, ніби нічого не було</code></pre>
+<p>Гарантії транзакцій описує абревіатура <b>ACID</b>:</p>
+<ul>
+  <li><b>A — Atomicity (атомарність):</b> усе або нічого. Впав сервер між двома UPDATE — після перезапуску база відкотить перший.</li>
+  <li><b>C — Consistency (узгодженість):</b> транзакція переводить базу з одного правильного стану в інший. Обмеження (NOT NULL, CHECK, FK) не можуть бути порушені «в кінці».</li>
+  <li><b>I — Isolation (ізольованість):</b> паралельні транзакції не бачать проміжних станів одна одної (з нюансами — нижче).</li>
+  <li><b>D — Durability (довговічність):</b> після <code>COMMIT</code> дані не зникнуть навіть при вимкненні живлення — вони вже у журналі WAL на диску.</li>
+</ul>
+<p><b>Рівні ізоляції</b> — це компроміс між «ідеальною ізоляцією» і швидкістю. У Postgres за замовчуванням <b>Read Committed</b>: транзакція бачить лише закомічені зміни інших, але два однакові SELECT усередині однієї транзакції можуть повернути різне, якщо між ними хтось закомітив. <b>Repeatable Read</b> робить «знімок» на початку транзакції — усі читання бачать ту саму картину. <b>Serializable</b> — найсуворіший: база гарантує, що результат такий, ніби транзакції виконувались по черзі, і при конфлікті одну з них відхилить (треба повторити). Для більшості CRUD достатньо Read Committed; для фінансових операцій, лічильників і «перевірив-і-записав» логіки — Repeatable Read/Serializable або явні блокування (<code>SELECT ... FOR UPDATE</code>).</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>PostgreSQL реалізує ізоляцію через <b>MVCC</b> (Multi-Version Concurrency Control): при оновленні рядка база не перезаписує його, а створює нову версію, а стара лишається видимою транзакціям, що почалися раніше. Тому читачі не блокують писців, а писці — читачів. Побічний ефект: «мертві» версії накопичуються, і їх прибирає процес <b>VACUUM</b> (автоматично — autovacuum). Якщо ви колись побачите, що таблиця «розпухла» після мільйонів UPDATE, — це воно. Класична задача «перевірити залишок і списати» без блокування або Serializable — гонка (race condition): дві транзакції обидві бачать залишок 1, обидві списують, залишок стає −1. Правильно: <code>UPDATE stock SET qty = qty - 1 WHERE id = ? AND qty &gt; 0 RETURNING qty</code> — одна атомарна операція.</p>
+</div>
+
+<h2 id="s7">7. PostgreSQL на практиці: Docker, psql, Node, ORM, міграції</h2>
+<h3>Запуск через Docker</h3>
+<p>Найпростіший спосіб мати Postgres локально без «засмічення» системи — Docker (детально про нього у розділі 11, поки що достатньо встановити Docker Desktop):</p>
+<pre><code class="language-bash"># Запустити Postgres 16 у контейнері з паролем і базою "blog"
+docker run --name pg-blog \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=blog \
+  -p 5432:5432 \
+  -v pg-blog-data:/var/lib/postgresql/data \
+  -d postgres:16
+
+# Зайти в консоль psql усередині контейнера
+docker exec -it pg-blog psql -U postgres -d blog</code></pre>
+<pre><code class="language-sql">-- Корисні команди psql (починаються з бекслеша, це не SQL)
+\dt            -- список таблиць
+\d posts       -- структура таблиці posts: колонки, індекси, FK
+\x             -- вертикальний вивід (зручно для широких рядків)
+\timing        -- показувати час виконання запиту
+\q             -- вийти</code></pre>
+<p>Для графічної роботи встановіть <b>DBeaver</b> (безкоштовний, кросплатформний) або pgAdmin: перегляд таблиць, редагування рядків, ER-діаграми, збережені запити. Підключення: host <code>localhost</code>, port <code>5432</code>, database <code>blog</code>, user <code>postgres</code>, password <code>secret</code>.</p>
+
+<h3>Підключення з Node.js: пакет pg</h3>
+<pre><code class="language-bash">npm install pg</code></pre>
+<pre><code class="language-js">// src/db.mjs — один пул з'єднань на весь застосунок
+import pg from "pg";
+
+// Пул (pool) тримає кілька відкритих з'єднань і видає їх запитам по черзі.
+// Відкривати нове з'єднання на кожен запит — дорого (десятки мс + ліміт з'єднань у Postgres).
+export const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL, // postgres://postgres:secret@localhost:5432/blog
+  max: 10,                                    // максимум одночасних з'єднань
+});
+
+// src/repositories/posts.repository.mjs
+import { pool } from "../db.mjs";
+
+export const postsRepository = {
+  async findPublished({ limit = 10, offset = 0 }) {
+    // $1, $2 — параметри. Значення передаються ОКРЕМО від тексту SQL.
+    const { rows } = await pool.query(
+      `SELECT p.id, p.title, p.created_at, u.name AS author
+       FROM posts p JOIN users u ON u.id = p.user_id
+       WHERE p.published = true
+       ORDER BY p.created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    return rows;
+  },
+
+  async create({ userId, title, body }) {
+    const { rows } = await pool.query(
+      `INSERT INTO posts (user_id, title, body) VALUES ($1, $2, $3) RETURNING *`,
+      [userId, title, body]
+    );
+    return rows[0];
+  },
+
+  // Транзакція: потрібне ОДНЕ з'єднання на всі кроки, тому беремо клієнта з пулу
+  async transferKarma(fromId, toId, amount) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("UPDATE users SET karma = karma - $1 WHERE id = $2", [amount, fromId]);
+      await client.query("UPDATE users SET karma = karma + $1 WHERE id = $2", [amount, toId]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK"); // будь-яка помилка — відкотити все
+      throw err;
+    } finally {
+      client.release();               // ЗАВЖДИ повернути з'єднання в пул
+    }
+  },
+};</code></pre>
+
+<h3>SQL-ін'єкції: чому параметри, а не конкатенація</h3>
+<p>Найнебезпечніша помилка новачка — склеювати SQL із рядка користувача. Гість ресторану пише в графі «ім'я для бронювання»: <i>«Іван; а ще віддайте всю касу»</i> — і якщо офіціант тупо читає записку вголос як команду, кухня виконає обидві частини.</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Схема SQL-ін'єкції: користувацький ввід склеюється в рядок SQL і змінює запит; параметризований запит передає значення окремо">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="28" class="bold">Небезпечно: конкатенація рядків</text>
+    <rect x="20" y="40" width="200" height="50" rx="10" class="red"/>
+    <text x="120" y="60" text-anchor="middle" class="small">Ввід користувача (email):</text>
+    <text x="120" y="80" text-anchor="middle" class="mono">' OR 1=1; --</text>
+    <path d="M220 65 L280 65" class="arrow"/>
+    <rect x="280" y="40" width="460" height="50" rx="10" class="red"/>
+    <text x="300" y="60" class="mono small">"SELECT * FROM users WHERE email = '" + input + "'"</text>
+    <text x="300" y="80" class="mono small">→ SELECT * FROM users WHERE email = '' OR 1=1; --'</text>
+    <text x="20" y="118" class="small">Умова 1=1 завжди істинна → база віддала ВСІХ користувачів. Заміна на «'; DROP TABLE users; --» видалить таблицю.</text>
+
+    <text x="20" y="168" class="bold">Безпечно: параметризований запит</text>
+    <rect x="20" y="180" width="200" height="50" rx="10" class="green"/>
+    <text x="120" y="200" text-anchor="middle" class="small">Той самий ввід:</text>
+    <text x="120" y="220" text-anchor="middle" class="mono">' OR 1=1; --</text>
+    <path d="M220 205 L280 205" class="arrow"/>
+    <rect x="280" y="180" width="460" height="50" rx="10" class="green"/>
+    <text x="300" y="200" class="mono small">query("SELECT * FROM users WHERE email = $1", [input])</text>
+    <text x="300" y="220" class="mono small">SQL і дані їдуть до бази ОКРЕМИМИ каналами</text>
+
+    <rect x="20" y="250" width="720" height="60" rx="10" class="box-fill"/>
+    <text x="40" y="274" class="small">База спершу компілює план для «email = $1», а потім підставляє значення як ЛІТЕРАЛ.</text>
+    <text x="40" y="294" class="small">Ввід «' OR 1=1; --» шукається як буквальний email. Результат: 0 рядків, нічого не зламано.</text>
+  </svg>
+  <figcaption>SQL-ін'єкція можлива лише тоді, коли дані стають частиною тексту команди. Параметри ($1, $2) назавжди розділяють команду і дані.</figcaption>
+</figure>
+
+<pre><code class="language-js">// ❌ НІКОЛИ так
+const rows = await pool.query(`SELECT * FROM users WHERE email = '${req.body.email}'`);
+
+// ✅ Завжди так
+const rows = await pool.query("SELECT * FROM users WHERE email = $1", [req.body.email]);
+
+// Єдине, що не можна параметризувати — назви таблиць/колонок і напрямок сортування.
+// Для них — білий список:
+const allowedSort = { newest: "created_at DESC", oldest: "created_at ASC" };
+const orderBy = allowedSort[req.query.sort] ?? allowedSort.newest;
+await pool.query(`SELECT * FROM posts ORDER BY ${orderBy} LIMIT $1`, [limit]);</code></pre>
+
+<h3>ORM і query builder: Drizzle та Prisma</h3>
+<p>Писати весь SQL рядками працює, але не дає автодоповнення, типів і захисту від одруків у назвах колонок. Тут допомагають два класи інструментів. <b>ORM</b> (Object-Relational Mapping) — бібліотека, яка представляє таблиці як об'єкти/класи і генерує SQL сама. <b>Query builder</b> — «конструктор SQL» із функцій, ближчий до самої мови. Два лідери в екосистемі TypeScript:</p>
+<ul>
+  <li><b>Prisma</b> — «повноцінний ORM»: власна мова схеми (<code>schema.prisma</code>), генерований клієнт із ідеальними типами, вбудовані міграції, Prisma Studio для перегляду даних. Простий старт, але між вами й SQL — товстий шар абстракції.</li>
+  <li><b>Drizzle</b> — «SQL-подібний» query builder із типами: схема описується в TypeScript, запити виглядають майже як SQL, тонкий і швидкий, є міграції (drizzle-kit). Якщо ви знаєте SQL, Drizzle не ховає його від вас. Саме його ми використовуватимемо далі в посібнику.</li>
+</ul>
+<pre><code class="language-bash">npm install drizzle-orm pg
+npm install -D drizzle-kit</code></pre>
+<pre><code class="language-ts">// src/db/schema.ts — схема Drizzle (це і є "джерело правди" для міграцій)
+import { pgTable, integer, text, boolean, timestamp, primaryKey } from "drizzle-orm/pg-core";
+
+export const users = pgTable("users", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const posts = pgTable("posts", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: integer("user_id").notNull().references(() =&gt; users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),
+  published: boolean("published").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const tags = pgTable("tags", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull().unique(),
+});
+
+// Join-таблиця для N:M зі складеним первинним ключем
+export const postTags = pgTable("post_tags", {
+  postId: integer("post_id").notNull().references(() =&gt; posts.id, { onDelete: "cascade" }),
+  tagId: integer("tag_id").notNull().references(() =&gt; tags.id, { onDelete: "cascade" }),
+}, (t) =&gt; [primaryKey({ columns: [t.postId, t.tagId] })]);</code></pre>
+<pre><code class="language-ts">// src/db/index.ts — підключення
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
+import * as schema from "./schema";
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+export const db = drizzle(pool, { schema });
+
+// src/repositories/posts.repository.ts — запити з типами
+import { eq, desc, count } from "drizzle-orm";
+import { db } from "../db";
+import { posts, users } from "../db/schema";
+
+export async function findPublished(limit = 10) {
+  // Drizzle згенерує майже той самий SQL, що ми писали руками, але з автодоповненням
+  return db
+    .select({ id: posts.id, title: posts.title, author: users.name, createdAt: posts.createdAt })
+    .from(posts)
+    .innerJoin(users, eq(users.id, posts.userId))
+    .where(eq(posts.published, true))
+    .orderBy(desc(posts.createdAt))
+    .limit(limit);
+}
+
+export async function createPost(data: { userId: number; title: string; body: string }) {
+  const [post] = await db.insert(posts).values(data).returning(); // типізований результат
+  return post;
+}
+
+export async function postsPerUser() {
+  return db
+    .select({ name: users.name, postsCount: count(posts.id) })
+    .from(users)
+    .leftJoin(posts, eq(posts.userId, users.id))
+    .groupBy(users.id, users.name);
+}</code></pre>
+
+<h3>Міграції: як змінювати схему без втрати даних</h3>
+<p>Схема бази змінюється: додали колонку, перейменували таблицю, створили індекс. Робити це «руками в DBeaver» на продакшені — шлях до катастрофи: на вашому ноутбуці колонка є, у колеги немає, на сервері — інша версія. <b>Міграція</b> (migration) — це файл із SQL-змінами, пронумерований і закомічений у Git. База зберігає таблицю з переліком уже застосованих міграцій, тому команда «застосуй міграції» на будь-якому середовищі приводить схему до однакового стану.</p>
+
+<figure>
+  <svg viewBox="0 0 760 260" role="img" aria-label="Потік міграцій: зміна схеми в коді, генерація SQL-файлу міграції, коміт у Git, застосування на dev, CI та production">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="40" width="150" height="70" rx="12" class="blue"/>
+    <text x="95" y="66" text-anchor="middle" class="bold">1. schema.ts</text>
+    <text x="95" y="86" text-anchor="middle" class="small">додали колонку</text>
+    <text x="95" y="102" text-anchor="middle" class="mono small">views: integer</text>
+    <path d="M170 75 L215 75" class="arrow"/>
+    <rect x="215" y="40" width="170" height="70" rx="12" class="accent"/>
+    <text x="300" y="66" text-anchor="middle" class="bold">2. drizzle-kit generate</text>
+    <text x="300" y="86" text-anchor="middle" class="mono small">0003_add_views.sql</text>
+    <text x="300" y="102" text-anchor="middle" class="mono small">ALTER TABLE posts ADD ...</text>
+    <path d="M385 75 L430 75" class="arrow"/>
+    <rect x="430" y="40" width="130" height="70" rx="12" class="purple"/>
+    <text x="495" y="66" text-anchor="middle" class="bold">3. git commit</text>
+    <text x="495" y="86" text-anchor="middle" class="small">код + міграція</text>
+    <text x="495" y="102" text-anchor="middle" class="small">разом у PR</text>
+    <path d="M560 75 L605 75" class="arrow"/>
+    <rect x="605" y="40" width="135" height="70" rx="12" class="green"/>
+    <text x="672" y="66" text-anchor="middle" class="bold">4. migrate</text>
+    <text x="672" y="86" text-anchor="middle" class="small">на кожному</text>
+    <text x="672" y="102" text-anchor="middle" class="small">середовищі</text>
+
+    <path d="M672 110 L672 150" class="arrow"/>
+    <rect x="440" y="150" width="90" height="40" rx="10" class="box-fill"/>
+    <text x="485" y="175" text-anchor="middle" class="small">dev (ноутбук)</text>
+    <rect x="545" y="150" width="90" height="40" rx="10" class="box-fill"/>
+    <text x="590" y="175" text-anchor="middle" class="small">CI (тести)</text>
+    <rect x="650" y="150" width="90" height="40" rx="10" class="box-fill"/>
+    <text x="695" y="175" text-anchor="middle" class="small">production</text>
+    <path d="M672 150 L590 150" class="arrow" style="marker-end:none"/>
+    <path d="M590 150 L485 150" class="arrow" style="marker-end:none"/>
+
+    <rect x="20" y="150" width="380" height="90" rx="12" class="box-fill"/>
+    <text x="35" y="174" class="small bold">Таблиця __drizzle_migrations у базі пам'ятає, що вже застосовано:</text>
+    <text x="35" y="196" class="mono small">0001_init.sql        ✔ 2026-01-10</text>
+    <text x="35" y="214" class="mono small">0002_add_tags.sql    ✔ 2026-02-02</text>
+    <text x="35" y="232" class="mono small">0003_add_views.sql   → буде застосовано зараз</text>
+  </svg>
+  <figcaption>Схема в коді — джерело правди. Інструмент генерує SQL-файл, він потрапляє в Git і застосовується однаково на всіх середовищах.</figcaption>
+</figure>
+
+<pre><code class="language-bash"># drizzle.config.ts вказує на schema.ts і DATABASE_URL
+npx drizzle-kit generate   # порівняти schema.ts із попереднім станом → створити drizzle/0003_*.sql
+npx drizzle-kit migrate    # застосувати незастосовані міграції до бази
+npx drizzle-kit studio     # веб-інтерфейс для перегляду даних</code></pre>
+<p>Правила міграцій: ніколи не редагуйте вже застосовану міграцію — створюйте нову; небезпечні зміни (видалення колонки, перейменування) робіть у два кроки (спершу додати нове поле і перенести дані, потім у наступному релізі видалити старе), щоб старий і новий код могли працювати одночасно під час деплою.</p>
+
+<h3>Бекапи</h3>
+<p>База без бекапу — це не база, а тимчасовий кеш. Мінімум: <code>pg_dump</code> за розкладом у сховище (S3 тощо) і — головне — <b>регулярна перевірка відновлення</b>. Бекап, який ніхто не пробував відновити, не існує.</p>
+<pre><code class="language-bash"># Зробити дамп (стиснутий, "custom" формат — можна відновлювати вибірково)
+docker exec pg-blog pg_dump -U postgres -Fc blog &gt; blog-$(date +%F).dump
+
+# Відновити в порожню базу
+docker exec -i pg-blog pg_restore -U postgres -d blog_restored &lt; blog-2026-09-09.dump</code></pre>
+<p>Керовані бази (Neon, Supabase, AWS RDS, Railway) роблять бекапи автоматично і дозволяють відновитися «на момент часу» (point-in-time recovery). Для продакшену це майже завжди правильний вибір замість власного контейнера.</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>N+1 запитів.</b> Взяли 100 постів одним запитом, а потім для кожного окремо запитали автора — 101 запит замість одного JOIN. ORM робить це непомітно; дивіться в логи SQL.</li>
+    <li><b>SELECT *</b> у продакшен-коді. Тягне всі колонки (включно з <code>body</code> на 50 КБ), ламається при зміні порядку колонок. Перелічуйте потрібні.</li>
+    <li><b>Забутий <code>client.release()</code></b> — пул вичерпується, і всі наступні запити зависають назавжди. Завжди <code>finally</code>.</li>
+    <li><b>OFFSET для глибокої пагінації.</b> <code>OFFSET 100000</code> змушує базу прочитати й викинути 100 000 рядків. Використовуйте keyset-пагінацію: <code>WHERE created_at &lt; $last_seen ORDER BY created_at DESC LIMIT 20</code>.</li>
+    <li><b>Пароль бази в коді або Docker-команді в README</b> — тільки змінні оточення.</li>
+  </ul>
+</div>
+
+<h2 id="s8">8. Проєктуємо схему блогу</h2>
+<p>Зберемо все разом. Типовий блог має користувачів, пости, коментарі та теги. Нижче — <b>ER-діаграма</b> (Entity-Relationship — «сутність-зв'язок»), стандартний спосіб малювати схему бази.</p>
+
+<figure>
+  <svg viewBox="0 0 760 420" role="img" aria-label="ER-діаграма блогу: таблиці users, posts, comments, tags, post_tags та зв'язки між ними">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <!-- users -->
+    <rect x="20" y="20" width="200" height="30" rx="8" class="blue"/>
+    <text x="120" y="41" text-anchor="middle" class="bold">users</text>
+    <rect x="20" y="50" width="200" height="96" class="box-fill"/>
+    <text x="30" y="70" class="mono small">id            PK</text>
+    <text x="30" y="88" class="mono small">email         text UNIQUE</text>
+    <text x="30" y="106" class="mono small">name          text</text>
+    <text x="30" y="124" class="mono small">password_hash text</text>
+    <text x="30" y="142" class="mono small">created_at    timestamptz</text>
+
+    <!-- posts -->
+    <rect x="300" y="20" width="200" height="30" rx="8" class="green"/>
+    <text x="400" y="41" text-anchor="middle" class="bold">posts</text>
+    <rect x="300" y="50" width="200" height="132" class="box-fill"/>
+    <text x="310" y="70" class="mono small">id          PK</text>
+    <text x="310" y="88" class="mono small">user_id     FK → users</text>
+    <text x="310" y="106" class="mono small">title       text</text>
+    <text x="310" y="124" class="mono small">slug        text UNIQUE</text>
+    <text x="310" y="142" class="mono small">body        text</text>
+    <text x="310" y="160" class="mono small">published   boolean</text>
+    <text x="310" y="178" class="mono small">created_at  timestamptz</text>
+
+    <!-- comments -->
+    <rect x="300" y="240" width="200" height="30" rx="8" class="accent"/>
+    <text x="400" y="261" text-anchor="middle" class="bold">comments</text>
+    <rect x="300" y="270" width="200" height="96" class="box-fill"/>
+    <text x="310" y="290" class="mono small">id          PK</text>
+    <text x="310" y="308" class="mono small">post_id     FK → posts</text>
+    <text x="310" y="326" class="mono small">user_id     FK → users</text>
+    <text x="310" y="344" class="mono small">body        text</text>
+    <text x="310" y="362" class="mono small">created_at  timestamptz</text>
+
+    <!-- post_tags -->
+    <rect x="560" y="120" width="180" height="30" rx="8" class="purple"/>
+    <text x="650" y="141" text-anchor="middle" class="bold">post_tags</text>
+    <rect x="560" y="150" width="180" height="46" class="box-fill"/>
+    <text x="570" y="170" class="mono small">post_id  FK → posts  PK</text>
+    <text x="570" y="188" class="mono small">tag_id   FK → tags   PK</text>
+
+    <!-- tags -->
+    <rect x="560" y="260" width="180" height="30" rx="8" class="red"/>
+    <text x="650" y="281" text-anchor="middle" class="bold">tags</text>
+    <rect x="560" y="290" width="180" height="46" class="box-fill"/>
+    <text x="570" y="310" class="mono small">id    PK</text>
+    <text x="570" y="328" class="mono small">name  text UNIQUE</text>
+
+    <!-- relations -->
+    <path d="M300 88 L220 70" class="arrow"/>
+    <text x="255" y="66" text-anchor="middle" class="small">N : 1</text>
+    <path d="M300 326 C 200 326, 150 200, 120 146" class="arrow"/>
+    <text x="180" y="240" text-anchor="middle" class="small">N : 1</text>
+    <path d="M400 240 L400 182" class="arrow"/>
+    <text x="420" y="215" class="small">N : 1</text>
+    <path d="M560 170 L500 120" class="arrow"/>
+    <text x="545" y="135" text-anchor="middle" class="small">N : 1</text>
+    <path d="M650 260 L650 196" class="arrow"/>
+    <text x="670" y="232" class="small">N : 1</text>
+
+    <text x="20" y="400" class="small">Стрілка йде від зовнішнього ключа до первинного. posts ⟷ tags — це N:M через post_tags.</text>
+  </svg>
+  <figcaption>Схема блогу: чотири сутності та одна join-таблиця. Кожен факт (ім'я автора, назва тегу) зберігається рівно в одному місці.</figcaption>
+</figure>
+
+<pre><code class="language-sql">-- Повна DDL-схема блогу (той самий результат дасть drizzle-kit generate зі schema.ts вище)
+CREATE TABLE users (
+  id            integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email         text NOT NULL UNIQUE,
+  name          text NOT NULL,
+  password_hash text NOT NULL,                 -- ніколи не зберігаємо пароль відкритим (розділ 07)
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE posts (
+  id         integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id    integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      text NOT NULL,
+  slug       text NOT NULL UNIQUE,             -- для гарних URL: /posts/pro-kotiv
+  body       text NOT NULL DEFAULT '',
+  published  boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX posts_user_id_idx ON posts (user_id);
+CREATE INDEX posts_published_created_idx ON posts (created_at DESC) WHERE published; -- частковий індекс
+
+CREATE TABLE comments (
+  id         integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  post_id    integer NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id    integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body       text NOT NULL CHECK (length(body) BETWEEN 1 AND 5000),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX comments_post_id_idx ON comments (post_id);
+
+CREATE TABLE tags (
+  id   integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name text NOT NULL UNIQUE
+);
+
+CREATE TABLE post_tags (
+  post_id integer NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  tag_id  integer NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (post_id, tag_id)               -- складений PK: пара унікальна і одразу індексована
+);
+
+-- Запит для головної сторінки: пости з автором, тегами і кількістю коментарів
+SELECT
+  p.id, p.title, p.slug, p.created_at,
+  u.name AS author,
+  count(DISTINCT c.id) AS comments_count,
+  coalesce(array_agg(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), '{}') AS tags
+FROM posts p
+JOIN users u        ON u.id = p.user_id
+LEFT JOIN comments c ON c.post_id = p.id
+LEFT JOIN post_tags pt ON pt.post_id = p.id
+LEFT JOIN tags t     ON t.id = pt.tag_id
+WHERE p.published
+GROUP BY p.id, u.name
+ORDER BY p.created_at DESC
+LIMIT 20;</code></pre>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Схема бази — найдорожче для зміни рішення в проєкті. Код рефакторять щотижня, а «переїхати» таблицю на 50 мільйонів рядків без простою — окремий проєкт. Годину, витрачену на ER-діаграму до першого <code>CREATE TABLE</code>, ви окупите десятикратно. Питання, які треба ставити: «Що станеться, коли автор зміниться?», «Чи можуть у поста бути два автори?», «Чи буде цей запит швидким на мільйоні рядків?».</p>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Підніміть Postgres у Docker, виконайте DDL блогу, наповніть 3 користувачами, 5 постами, 10 коментарями і 4 тегами.</li>
+    <li>Напишіть запити: «пости з тегом sql», «користувачі, що коментували чужі пости», «тег, який використовують найчастіше».</li>
+    <li>Виконайте <code>EXPLAIN ANALYZE</code> для запиту головної сторінки. Видаліть індекс <code>comments_post_id_idx</code> і порівняйте план. Поверніть індекс.</li>
+    <li>Замініть in-memory репозиторій нотаток із розділу 04 на Drizzle + Postgres. Контролери і сервіси не мають змінитися.</li>
+    <li>Спробуйте SQL-ін'єкцію на власному API з конкатенацією, потім перепишіть на параметри і переконайтесь, що атака не працює.</li>
+    <li>Зробіть <code>pg_dump</code>, видаліть базу, відновіть її з дампу. Це єдиний спосіб знати, що бекап справжній.</li>
+  </ol>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим первинний ключ відрізняється від зовнішнього?</summary><p>Первинний ключ (PK) унікально ідентифікує рядок у своїй таблиці. Зовнішній ключ (FK) — колонка, що містить значення PK іншої таблиці і створює зв'язок; база гарантує, що FK посилається на існуючий рядок.</p></details>
+  <details><summary>2. Як реалізувати зв'язок «багато до багатьох» між постами й тегами?</summary><p>Через проміжну (join) таблицю <code>post_tags</code> із двома зовнішніми ключами <code>post_id</code> і <code>tag_id</code> та складеним первинним ключем із них обох.</p></details>
+  <details><summary>3. Чим LEFT JOIN відрізняється від INNER JOIN?</summary><p>INNER JOIN повертає лише рядки, для яких є пара в обох таблицях. LEFT JOIN повертає всі рядки лівої таблиці, а для тих, у кого пари немає, колонки правої заповнюються NULL. «Автори без постів» — це LEFT JOIN із <code>WHERE posts.id IS NULL</code>.</p></details>
+  <details><summary>4. Чим WHERE відрізняється від HAVING?</summary><p>WHERE фільтрує рядки до групування, HAVING — групи після <code>GROUP BY</code>, тому в HAVING можна використовувати агрегати (<code>count(*) &gt; 2</code>), а у WHERE — ні.</p></details>
+  <details><summary>5. Чому не варто створювати індекс на кожну колонку?</summary><p>Кожен індекс сповільнює вставки та оновлення (його треба підтримувати) і займає диск. Індекси на колонках із малою кількістю різних значень майже не допомагають. Створюйте індекси під конкретні повільні запити, підтверджені <code>EXPLAIN ANALYZE</code>.</p></details>
+  <details><summary>6. Що гарантує «A» в ACID і як це виглядає у коді?</summary><p>Atomicity — усі операції транзакції виконуються або жодна. У коді: <code>BEGIN</code>, кілька запитів на одному з'єднанні, <code>COMMIT</code> в разі успіху або <code>ROLLBACK</code> у <code>catch</code>, і <code>client.release()</code> у <code>finally</code>.</p></details>
+  <details><summary>7. Чому параметризований запит захищає від SQL-ін'єкції?</summary><p>Текст SQL і значення параметрів передаються базі окремо: база спершу розбирає команду з плейсхолдерами <code>$1</code>, а потім підставляє значення як літерали. Ввід користувача ніколи не інтерпретується як частина команди.</p></details>
+  <details><summary>8. Навіщо міграції, якщо можна змінити таблицю в DBeaver?</summary><p>Щоб зміни схеми були версійованими, відтворюваними та однаковими на всіх середовищах (ноутбук кожного розробника, CI, продакшен). Міграція — SQL-файл у Git; база зберігає список застосованих, тому команда migrate завжди приводить схему до відомого стану.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>База даних, а не файл: індексований пошук, паралельний доступ, надійність (WAL), зв'язки та мова запитів.</li>
+  <li>Реляційна модель: таблиці → рядки й типізовані колонки; PK ідентифікує рядок, FK створює зв'язок і охороняє цілісність.</li>
+  <li>Зв'язки: 1:1 (FK + UNIQUE), 1:N (FK на стороні «багато»), N:M (join-таблиця з двома FK).</li>
+  <li>Нормалізуйте до 3НФ (кожен факт в одному місці), денормалізуйте лише свідомо і з планом оновлення дубліката.</li>
+  <li>SQL: <code>SELECT ... FROM ... WHERE ... GROUP BY ... HAVING ... ORDER BY ... LIMIT</code>; JOIN з'єднує таблиці за FK = PK; UPDATE/DELETE завжди з WHERE.</li>
+  <li>Індекс (B-tree) перетворює повне сканування на кілька кроків; створюйте на FK і під конкретні запити, перевіряйте через <code>EXPLAIN ANALYZE</code>.</li>
+  <li>Транзакції дають ACID: усе або нічого, дані не зникнуть після COMMIT, паралельні операції ізольовані згідно з обраним рівнем.</li>
+  <li>Ніколи не склеюйте SQL із рядків користувача — тільки параметри <code>$1</code>; для назв колонок — білий список.</li>
+  <li>Пул з'єднань один на застосунок; <code>client.release()</code> у <code>finally</code>.</li>
+  <li>Схема в коді (Drizzle) → міграції в Git → однакова база на всіх середовищах; бекап існує лише після успішного відновлення.</li>
+  <li><code>numeric</code> для грошей, <code>timestamptz</code> для часу, <code>text</code> для рядків, identity для id.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://www.postgresql.org/docs/current/tutorial.html" target="_blank" rel="noopener">PostgreSQL Documentation: Tutorial</a> — офіційний вступ, далі — розділи про <a href="https://www.postgresql.org/docs/current/indexes.html" target="_blank" rel="noopener">індекси</a> та <a href="https://www.postgresql.org/docs/current/transaction-iso.html" target="_blank" rel="noopener">рівні ізоляції</a>. Найточніше джерело.</li>
+    <li><a href="https://www.postgresqltutorial.com/" target="_blank" rel="noopener">PostgreSQL Tutorial</a> — покрокові уроки з прикладами для кожної конструкції SQL саме в діалекті Postgres.</li>
+    <li><a href="https://sqlbolt.com/" target="_blank" rel="noopener">SQLBolt</a> — інтерактивні уроки SQL у браузері; найшвидший спосіб «набити руку» на SELECT і JOIN.</li>
+    <li><a href="https://pgexercises.com/" target="_blank" rel="noopener">PGExercises</a> — задачі на PostgreSQL з перевіркою відповіді: від базових до агрегацій і віконних функцій.</li>
+    <li><a href="https://use-the-index-luke.com/" target="_blank" rel="noopener">Use The Index, Luke!</a> — безкоштовна книга Маркуса Вінанда про індекси та продуктивність SQL. Обов'язкова після цього розділу.</li>
+    <li><a href="https://orm.drizzle.team/docs/overview" target="_blank" rel="noopener">Drizzle ORM Docs</a> — схема, запити, міграції drizzle-kit; ми використовуємо Drizzle у наступних розділах.</li>
+    <li><a href="https://www.prisma.io/docs" target="_blank" rel="noopener">Prisma Docs</a> — альтернативний ORM; корисно знати обидва, бо зустрінете в проєктах.</li>
+    <li><a href="https://node-postgres.com/" target="_blank" rel="noopener">node-postgres (pg)</a> — документація драйвера: пул, параметризовані запити, транзакції.</li>
+    <li><a href="https://wiki.postgresql.org/wiki/Don%27t_Do_This" target="_blank" rel="noopener">PostgreSQL Wiki: Don't Do This</a> — офіційний перелік антипатернів (timestamp без tz, char(n), money type тощо) з поясненнями.</li>
+    <li><a href="https://dataintensive.net/" target="_blank" rel="noopener">«Designing Data-Intensive Applications», Martin Kleppmann</a> — книга-біблія про зберігання даних: індекси, реплікація, транзакції, консистентність. Читати після рівня «Новачок».</li>
+    <li><a href="https://dbeaver.io/" target="_blank" rel="noopener">DBeaver</a> — безкоштовний графічний клієнт для Postgres та інших баз з ER-діаграмами.</li>
+    <li><a href="https://roadmap.sh/postgresql-dba" target="_blank" rel="noopener">roadmap.sh — PostgreSQL DBA</a> — карта тем від основ до адміністрування й реплікації.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 05</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

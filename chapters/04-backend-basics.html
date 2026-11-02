@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04. Backend: сервер, Node.js, REST — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 04 · <span class="level-badge level-1">Новачок</span></div>
+  <h1>Backend: сервер, Node.js, REST</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, що таке сервер, чому Node.js встигає обслуговувати тисячі клієнтів одним потоком, і напишете власний REST API з маршрутами, валідацією та обробкою помилок.</p>
+  <div class="meta"><span>⏱ ~90 хв</span><span>📚 Передумови: розділи 01–03</span><span>🎯 Ціль: працюючий CRUD API для нотаток</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Що таке сервер: фізично і логічно</a></li>
+    <li><a href="#s2">Мови та рантайми для бекенду. Чому Node.js</a></li>
+    <li><a href="#s3">Event loop: один офіціант і багато столів</a></li>
+    <li><a href="#s4">Перший HTTP-сервер на чистому node:http</a></li>
+    <li><a href="#s5">Express: CRUD API для нотаток</a></li>
+    <li><a href="#s6">Middleware, статуси, валідація, конфіг</a></li>
+    <li><a href="#s7">Структура проєкту та CORS</a></li>
+    <li><a href="#s8">Тестування API і типові помилки</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>Уяви ресторан. Ти сидиш у залі — це <b>фронтенд</b>: красиві столики, меню з картинками, офіціант, що усміхається. Але їжу готують на <b>кухні</b>, куди гостям заходити не можна. Кухня — це <b>бекенд</b> (backend). Ти кажеш офіціанту «борщ і компот» — це <b>запит</b> (request). Офіціант несе замовлення на кухню, кухар дістає продукти з <b>холодильника</b> (бази даних), готує і віддає тарілку — це <b>відповідь</b> (response). Ти ніколи не бачиш кухню, але без неї ресторан — просто гарна кімната зі стільцями. У цьому розділі ми підемо на кухню і навчимося готувати самі.</p>
+</div>
+
+<h2 id="s1">1. Що таке сервер: фізично і логічно</h2>
+<p>Слово «сервер» (server, від англ. <i>to serve</i> — обслуговувати) має два значення, і новачки постійно їх плутають.</p>
+<p><b>Фізично</b> сервер — це просто комп'ютер. Часто без монітора й клавіатури, у металевій коробці, що стоїть у стійці дата-центру разом із сотнями таких самих. У нього більше оперативної пам'яті й процесорних ядер, ніж у вашого ноутбука, але принцип той самий: процесор, пам'ять, диск, мережева карта. Ваш ноутбук теж може бути сервером — просто зазвичай він вимикається на ніч, а справжній сервер працює 24/7.</p>
+<p><b>Логічно</b> сервер — це <b>програма</b>, яка слухає мережевий порт і відповідає на запити. Коли кажуть «підняти сервер на Node.js», мають на увазі саме програму. На одному фізичному комп'ютері можуть працювати десятки логічних серверів: веб-сервер на порту 3000, база даних на 5432, Redis на 6379.</p>
+<p>Тобто бекенд — це все, що відбувається «на кухні»: прийняти запит, перевірити, чи гість має право на цю страву (авторизація), сходити в холодильник (база даних), приготувати (бізнес-логіка), гарно викласти на тарілку (сформувати JSON) і віддати.</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Аналогія ресторану: зал, офіціант, кухня, холодильник відповідають браузеру, HTTP, серверу, базі даних">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="30" width="170" height="90" rx="14" class="blue"/>
+    <text x="105" y="62" text-anchor="middle" class="bold">Гість у залі</text>
+    <text x="105" y="84" text-anchor="middle" class="muted">браузер / застосунок</text>
+    <text x="105" y="104" text-anchor="middle" class="muted">(frontend)</text>
+
+    <path d="M190 60 L290 60" class="arrow"/>
+    <text x="240" y="48" text-anchor="middle" class="mono">замовлення</text>
+    <path d="M290 95 L190 95" class="arrow"/>
+    <text x="240" y="115" text-anchor="middle" class="mono">тарілка</text>
+
+    <rect x="290" y="30" width="170" height="90" rx="14" class="accent"/>
+    <text x="375" y="62" text-anchor="middle" class="bold">Офіціант</text>
+    <text x="375" y="84" text-anchor="middle" class="muted">HTTP-запит і відповідь</text>
+    <text x="375" y="104" text-anchor="middle" class="muted">(request / response)</text>
+
+    <path d="M460 60 L560 60" class="arrow"/>
+    <path d="M560 95 L460 95" class="arrow"/>
+
+    <rect x="560" y="30" width="180" height="90" rx="14" class="green"/>
+    <text x="650" y="62" text-anchor="middle" class="bold">Кухня</text>
+    <text x="650" y="84" text-anchor="middle" class="muted">сервер на Node.js</text>
+    <text x="650" y="104" text-anchor="middle" class="muted">(backend)</text>
+
+    <path d="M650 120 L650 190" class="arrow"/>
+    <text x="700" y="160" text-anchor="middle" class="mono">SQL</text>
+    <rect x="560" y="190" width="180" height="80" rx="14" class="purple"/>
+    <text x="650" y="222" text-anchor="middle" class="bold">Холодильник</text>
+    <text x="650" y="244" text-anchor="middle" class="muted">база даних</text>
+
+    <line x1="20" y1="150" x2="470" y2="150" class="arrow dashed" style="marker-end:none"/>
+    <text x="20" y="180" class="small">Ліворуч від лінії гість усе бачить.</text>
+    <text x="20" y="200" class="small">Праворуч — «службові приміщення»: код, файли, база, секрети.</text>
+    <text x="20" y="220" class="small">Гість не має доступу до кухні, але кухня відповідає за все,</text>
+    <text x="20" y="240" class="small">що він отримає на тарілці.</text>
+  </svg>
+  <figcaption>Ресторан як модель веб-застосунку: фронтенд — зал, HTTP — офіціант, бекенд — кухня, база даних — холодильник.</figcaption>
+</figure>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Розуміння межі між «залом» і «кухнею» — це основа безпеки. Все, що відправлено в браузер, гість може прочитати і змінити: HTML, JavaScript, навіть запити, які браузер надсилає. Тому <b>перевірка прав, розрахунок ціни, робота з паролями і секретами відбуваються тільки на бекенді</b>. Якщо ціна товару рахується у фронтенді й просто відправляється на сервер — будь-який школяр купить айфон за одну гривню.</p>
+</div>
+
+<h2 id="s2">2. Мови та рантайми для бекенду. Чому Node.js</h2>
+<p>На кухні можна готувати на газі, на індукції або на дровах — результат схожий, різні лише інструменти. Так само бекенд можна писати майже будь-якою мовою. Ось найпопулярніші варіанти:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Мова / рантайм</th><th>Сильні сторони</th><th>Де зустрічається</th><th>Типові фреймворки</th></tr></thead>
+  <tbody>
+    <tr><td><b>Node.js</b> (JavaScript / TypeScript)</td><td>Одна мова на фронті й беку, величезна екосистема npm, чудово для I/O-навантажень (API, чати, стріми)</td><td>Стартапи, SaaS, Netflix, PayPal, LinkedIn</td><td>Express, Hono, Fastify, NestJS, Next.js</td></tr>
+    <tr><td><b>Python</b></td><td>Простий синтаксис, лідер у data science та ML</td><td>Instagram, Dropbox, наукові проєкти</td><td>Django, FastAPI, Flask</td></tr>
+    <tr><td><b>Go</b></td><td>Дуже швидкий, компільований, вбудована конкурентність (goroutines), один бінарник</td><td>Docker, Kubernetes, Uber, Cloudflare</td><td>net/http, Gin, Echo</td></tr>
+    <tr><td><b>Java / Kotlin</b></td><td>Зрілість, строга типізація, гігантські корпоративні системи</td><td>Банки, страхові компанії, Android-бекенди</td><td>Spring Boot, Quarkus</td></tr>
+    <tr><td><b>C# (.NET)</b></td><td>Продуктивність, інтеграція з Microsoft-світом</td><td>Корпоративний сектор, ігри (Unity)</td><td>ASP.NET Core</td></tr>
+    <tr><td><b>Rust</b></td><td>Безпека пам'яті без збирача сміття, максимальна швидкість</td><td>Системні сервіси, високонавантажені API</td><td>Axum, Actix</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Важливо відрізняти <b>мову</b> від <b>рантайму</b> (runtime — середовище виконання). JavaScript — мова. Node.js — рантайм, тобто програма, яка вміє виконувати JavaScript поза браузером. Node.js складається з рушія V8 (того самого, що в Chrome) плюс бібліотеки libuv для роботи з файлами, мережею та таймерами. Є й інші рантайми для JavaScript: Deno і Bun — вони молодші, швидші в деяких сценаріях, але Node.js досі стандарт індустрії.</p>
+<p><b>Чому в цьому посібнику саме Node.js?</b> Три причини:</p>
+<ol>
+  <li><b>Одна мова.</b> Ви вже вивчили JavaScript у розділі 02. Не потрібно вивчати другу мову, щоб написати бекенд — ви одразу fullstack.</li>
+  <li><b>Екосистема.</b> npm — найбільший реєстр пакетів у світі. Для будь-якої задачі вже є бібліотека.</li>
+  <li><b>Модель виконання.</b> Node.js створений для задач, де сервер здебільшого <i>чекає</i>: на базу даних, на інший сервіс, на мережу. Це 90 % типових веб-застосунків. І саме тому треба зрозуміти event loop.</li>
+</ol>
+
+<h2 id="s3">3. Event loop: один офіціант і багато столів</h2>
+<p>Уявіть кафе, у якому працює <b>один-єдиний офіціант</b>. Здавалося б, катастрофа: якщо він прийме замовлення у столика №1 і стоятиме біля кухні, чекаючи, поки борщ звариться, столики №2–20 залишаться без уваги. Але хороший офіціант робить інакше: він передає замовлення на кухню і <b>одразу йде до наступного столика</b>. Коли кухня дзвонить у дзвіночок «борщ готовий», він забирає тарілку і несе гостю. Один офіціант обслуговує двадцять столиків, тому що <b>він ніколи не стоїть і не чекає</b>.</p>
+<p>Це і є <b>event loop</b> (цикл подій) Node.js. JavaScript у Node виконується в <b>одному потоці</b> (single thread) — це «офіціант». Довгі операції — читання файлу, запит до бази даних, HTTP-запит до іншого сервера, таймер — віддаються «на кухню», тобто у libuv та операційну систему. Поки вони виконуються, офіціант вільний. Коли операція завершилась, у чергу подій кладеться повідомлення «готово, ось результат», і офіціант, звільнившись, виконує відповідний callback (зворотний виклик) або продовжує <code>async</code>-функцію після <code>await</code>.</p>
+
+<figure>
+  <svg viewBox="0 0 760 360" role="img" aria-label="Схема event loop: один потік JavaScript обробляє чергу подій, довгі операції виконує libuv і система">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="140" height="60" rx="12" class="blue"/>
+    <text x="90" y="46" text-anchor="middle" class="bold">Столик 1</text>
+    <text x="90" y="66" text-anchor="middle" class="muted">запит A</text>
+    <rect x="20" y="100" width="140" height="60" rx="12" class="blue"/>
+    <text x="90" y="126" text-anchor="middle" class="bold">Столик 2</text>
+    <text x="90" y="146" text-anchor="middle" class="muted">запит B</text>
+    <rect x="20" y="180" width="140" height="60" rx="12" class="blue"/>
+    <text x="90" y="206" text-anchor="middle" class="bold">Столик 3</text>
+    <text x="90" y="226" text-anchor="middle" class="muted">запит C</text>
+
+    <path d="M160 50 L250 130" class="arrow"/>
+    <path d="M160 130 L250 130" class="arrow"/>
+    <path d="M160 210 L250 130" class="arrow"/>
+
+    <rect x="250" y="80" width="200" height="100" rx="14" class="accent"/>
+    <text x="350" y="112" text-anchor="middle" class="bold">Офіціант</text>
+    <text x="350" y="134" text-anchor="middle" class="muted">один потік JavaScript</text>
+    <text x="350" y="154" text-anchor="middle" class="muted">(call stack + event loop)</text>
+
+    <path d="M450 110 L560 70" class="arrow"/>
+    <text x="510" y="72" text-anchor="middle" class="mono small">віддати на кухню</text>
+    <rect x="560" y="30" width="180" height="70" rx="14" class="green"/>
+    <text x="650" y="58" text-anchor="middle" class="bold">Кухня</text>
+    <text x="650" y="80" text-anchor="middle" class="muted">libuv, ОС, потоки, диск, мережа</text>
+
+    <path d="M560 100 L560 230 L460 230" class="arrow"/>
+    <text x="640" y="150" text-anchor="middle" class="mono small">«готово!»</text>
+    <rect x="250" y="200" width="200" height="60" rx="12" class="purple"/>
+    <text x="350" y="224" text-anchor="middle" class="bold">Черга подій</text>
+    <text x="350" y="246" text-anchor="middle" class="muted">callback A, callback C ...</text>
+    <path d="M300 200 L300 180" class="arrow"/>
+    <text x="230" y="192" text-anchor="end" class="small">коли вільний</text>
+
+    <rect x="20" y="280" width="720" height="60" rx="12" class="box-fill"/>
+    <text x="380" y="304" text-anchor="middle" class="small">Правило: офіціант ніколи не чекає біля плити. Якщо код у потоці JS виконується довго</text>
+    <text x="380" y="324" text-anchor="middle" class="small">(наприклад, цикл на мільярд ітерацій) — усі столики завмирають. Це «блокування event loop».</text>
+  </svg>
+  <figcaption>Один потік JavaScript (офіціант) приймає запити, віддає довгі операції libuv (кухня) і повертається до них через чергу подій.</figcaption>
+</figure>
+
+<p>Подивімося, як це виглядає у коді. Три «замовлення» стартують майже одночасно, а завершуються в порядку готовності, а не в порядку старту:</p>
+<pre><code class="language-js">// event-loop-demo.mjs — запускати: node event-loop-demo.mjs
+import { setTimeout as sleep } from "node:timers/promises";
+
+console.log("1. Офіціант прийшов на роботу");
+
+// Замовлення для столика 1: "готується" 300 мс
+sleep(300).then(() =&gt; console.log("4. Столик 1: борщ готовий"));
+
+// Замовлення для столика 2: "готується" 100 мс
+sleep(100).then(() =&gt; console.log("3. Столик 2: кава готова"));
+
+// Це синхронний код — виконується одразу, поки "кухня" працює
+console.log("2. Офіціант пішов до інших столиків");
+
+// Вивід у консолі:
+// 1. Офіціант прийшов на роботу
+// 2. Офіціант пішов до інших столиків
+// 3. Столик 2: кава готова        (через ~100 мс)
+// 4. Столик 1: борщ готовий       (через ~300 мс)</code></pre>
+<p>Зверніть увагу: рядок «2» виводиться раніше, ніж «3» і «4», хоча в коді записаний після них. Це не помилка — це офіціант, що не чекає.</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>Блокування event loop.</b> Якщо ви напишете <code>while (Date.now() &lt; start + 5000) {}</code> або синхронно розпарсите файл на гігабайт, усі клієнти вашого сервера будуть чекати. Важкі обчислення (криптографія, обробка зображень, великі цикли) виносьте у <code>worker_threads</code> або окремий сервіс.</li>
+    <li><b>Синхронні API.</b> У Node є пари функцій: <code>fs.readFile</code> (асинхронна) і <code>fs.readFileSync</code> (синхронна, блокує). Синхронні версії допустимі тільки при старті програми (прочитати конфіг), але ніколи — усередині обробника запиту.</li>
+  </ul>
+</div>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Розуміння event loop пояснює, чому Node.js із одним потоком обслуговує десятки тисяч одночасних з'єднань, тоді як класичні сервери на «потік на запит» упираються в пам'ять. І водночас пояснює, чому один невдалий цикл може «покласти» весь сервер. Це найважливіша ментальна модель для Node-розробника — офіційний гайд <a href="https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick" target="_blank" rel="noopener">The Node.js Event Loop</a> варто прочитати повністю.</p>
+</div>
+
+<h2 id="s4">4. Перший HTTP-сервер на чистому node:http</h2>
+<p>У Node.js є вбудований модуль <code>node:http</code>. Він низькорівневий, зате показує, що насправді відбувається під капотом будь-якого фреймворку. Створімо сервер, який слухає порт 3000:</p>
+<pre><code class="language-js">// server.mjs — запускати: node server.mjs
+import { createServer } from "node:http";
+
+const server = createServer((req, res) =&gt; {
+  // req — об'єкт запиту (IncomingMessage): метод, URL, заголовки, тіло
+  // res — об'єкт відповіді (ServerResponse): ми його заповнюємо і відправляємо
+  console.log(`${req.method} ${req.url}`); // напр. "GET /notes?limit=5"
+
+  res.statusCode = 200;                            // статус: усе добре
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.end("Привіт від кухні!");                    // тіло відповіді + завершити
+});
+
+server.listen(3000, () =&gt; {
+  console.log("Сервер слухає http://localhost:3000");
+});</code></pre>
+<p>Запустіть і відкрийте у браузері <code>http://localhost:3000</code>. Браузер (гість) надіслав запит <code>GET /</code>, ваш код (кухня) відповів текстом. Вітаю, ви написали бекенд.</p>
+
+<h3>Маршрути, методи і параметри</h3>
+<p>Справжній API розрізняє, <i>що</i> саме просить клієнт. Для цього є три речі:</p>
+<ul>
+  <li><b>Метод (method)</b> — дієслово: <code>GET</code> (дай), <code>POST</code> (створи), <code>PUT</code>/<code>PATCH</code> (онови повністю / частково), <code>DELETE</code> (видали).</li>
+  <li><b>Шлях (path)</b> — іменник: <code>/notes</code> (усі нотатки), <code>/notes/42</code> (нотатка №42). Комбінація «метод + шлях» називається <b>маршрутом</b> (route).</li>
+  <li><b>Параметри</b> — уточнення. Вони бувають трьох видів:
+    <ul>
+      <li><b>параметри шляху</b> (path params): <code>/notes/<b>42</b></code> — ідентифікатор конкретного ресурсу;</li>
+      <li><b>query-параметри</b>: <code>/notes<b>?limit=5&amp;sort=date</b></code> — фільтри, сортування, пагінація;</li>
+      <li><b>тіло запиту</b> (body): дані, які треба зберегти — приходять у <code>POST</code>/<code>PUT</code>/<code>PATCH</code>, зазвичай як JSON.</li>
+    </ul>
+  </li>
+</ul>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Анатомія HTTP-запиту: метод, шлях, параметр шляху, query-параметри, заголовки, тіло">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="720" height="50" rx="10" class="box-fill"/>
+    <text x="40" y="52" class="mono" style="font-size:15px">PATCH   /notes/42   ?notify=true   HTTP/1.1</text>
+    <rect x="20" y="80" width="720" height="70" rx="10" class="box-fill"/>
+    <text x="40" y="104" class="mono">Content-Type: application/json</text>
+    <text x="40" y="124" class="mono">Authorization: Bearer eyJhbGci...</text>
+    <rect x="20" y="160" width="720" height="40" rx="10" class="box-fill"/>
+    <text x="40" y="186" class="mono">{ "title": "Купити молоко", "done": true }</text>
+
+    <path d="M80 70 L80 100" class="arrow" style="marker-end:none;stroke:transparent"/>
+    <rect x="30" y="210" width="130" height="30" rx="8" class="blue"/>
+    <text x="95" y="230" text-anchor="middle" class="small">метод (дієслово)</text>
+    <path d="M95 210 L75 70" class="arrow"/>
+
+    <rect x="180" y="210" width="150" height="30" rx="8" class="green"/>
+    <text x="255" y="230" text-anchor="middle" class="small">шлях + параметр 42</text>
+    <path d="M255 210 L190 70" class="arrow"/>
+
+    <rect x="350" y="210" width="130" height="30" rx="8" class="purple"/>
+    <text x="415" y="230" text-anchor="middle" class="small">query-параметри</text>
+    <path d="M415 210 L330 70" class="arrow"/>
+
+    <rect x="500" y="210" width="100" height="30" rx="8" class="accent"/>
+    <text x="550" y="230" text-anchor="middle" class="small">заголовки</text>
+    <path d="M550 210 L520 150" class="arrow"/>
+
+    <rect x="620" y="210" width="110" height="30" rx="8" class="red"/>
+    <text x="675" y="230" text-anchor="middle" class="small">тіло (JSON)</text>
+    <path d="M675 210 L660 200" class="arrow"/>
+  </svg>
+  <figcaption>Одна «замовлення-записка» HTTP: дієслово, іменник з ідентифікатором, уточнення в query, службові заголовки та JSON у тілі.</figcaption>
+</figure>
+
+<p>На чистому <code>node:http</code> усе це доводиться розбирати вручну. Ось мінімальний, але робочий приклад із розбором URL і тіла запиту:</p>
+<pre><code class="language-js">// raw-api.mjs
+import { createServer } from "node:http";
+
+const notes = [{ id: 1, title: "Перша нотатка" }]; // "холодильник" у пам'яті
+
+// Допоміжна функція: прочитати тіло запиту цілком і розпарсити JSON
+async function readJson(req) {
+  let raw = "";
+  for await (const chunk of req) raw += chunk; // тіло приходить шматками (chunks)
+  return raw ? JSON.parse(raw) : {};
+}
+
+function send(res, status, data) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(data));
+}
+
+createServer(async (req, res) =&gt; {
+  const url = new URL(req.url, "http://localhost"); // зручний розбір шляху і query
+  const limit = Number(url.searchParams.get("limit") ?? 100);
+
+  if (req.method === "GET" &amp;&amp; url.pathname === "/notes") {
+    return send(res, 200, notes.slice(0, limit));
+  }
+
+  if (req.method === "POST" &amp;&amp; url.pathname === "/notes") {
+    const body = await readJson(req);
+    const note = { id: notes.length + 1, title: body.title };
+    notes.push(note);
+    return send(res, 201, note); // 201 Created — ресурс створено
+  }
+
+  // Параметр шляху: /notes/42 -&gt; ["", "notes", "42"]
+  const [, resource, id] = url.pathname.split("/");
+  if (req.method === "GET" &amp;&amp; resource === "notes" &amp;&amp; id) {
+    const note = notes.find((n) =&gt; n.id === Number(id));
+    return note ? send(res, 200, note) : send(res, 404, { error: "Не знайдено" });
+  }
+
+  send(res, 404, { error: "Немає такого маршруту" });
+}).listen(3000, () =&gt; console.log("http://localhost:3000"));</code></pre>
+<p>Уже на цьому прикладі видно, що фреймворк потрібен не для «магії», а щоб не писати щоразу розбір шляхів, JSON і статуси вручну.</p>
+
+<h3>JSON — мова спілкування кухні й залу</h3>
+<p><b>JSON</b> (JavaScript Object Notation) — це текстовий формат для передачі структурованих даних. Він виглядає майже як об'єкт JavaScript, але з кількома суворими правилами: ключі завжди в подвійних лапках, немає коментарів, немає функцій, немає <code>undefined</code>, останній елемент без коми. Бекенд серіалізує (serialize — перетворює на рядок) об'єкт через <code>JSON.stringify()</code>, ставить заголовок <code>Content-Type: application/json</code>, а браузер робить <code>JSON.parse()</code> (у <code>fetch</code> це <code>await res.json()</code>). Саме JSON зробив можливим, щоб бекенд на будь-якій мові спілкувався з фронтендом на будь-якій мові: це «англійська» для програм.</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Збережіть <code>raw-api.mjs</code>, запустіть <code>node raw-api.mjs</code>.</li>
+    <li>У другому терміналі виконайте <code>curl http://localhost:3000/notes</code> — побачите масив із однією нотаткою.</li>
+    <li>Створіть нову: <code>curl -X POST http://localhost:3000/notes -H "Content-Type: application/json" -d '{"title":"Купити хліб"}'</code>.</li>
+    <li>Запитайте її за id: <code>curl http://localhost:3000/notes/2</code>. Потім спробуйте <code>/notes/99</code> і подивіться на 404.</li>
+    <li>Додайте маршрут <code>DELETE /notes/:id</code> самостійно. Підказка: <code>notes.splice(index, 1)</code> і статус <code>204 No Content</code> без тіла.</li>
+  </ol>
+</div>
+
+<h2 id="s5">5. Express: CRUD API для нотаток</h2>
+<p><b>Express</b> — найстаріший і найпоширеніший веб-фреймворк для Node.js. Він тонкий: не нав'язує структуру, лише дає роутер, middleware і зручні обгортки над <code>req</code>/<code>res</code>. Альтернатива з тією самою філософією, але сучасніша і швидша — <b>Hono</b>; його код майже дзеркальний до Express, тож вивчивши один, ви за годину освоїте інший. Тут ми пишемо на Express, бо в 90 % туторіалів і вакансій зустрінете саме його.</p>
+<p><b>CRUD</b> — це чотири базові операції над будь-якими даними: <b>C</b>reate (створити), <b>R</b>ead (прочитати), <b>U</b>pdate (оновити), <b>D</b>elete (видалити). Вони відповідають методам HTTP: POST, GET, PUT/PATCH, DELETE. Майже будь-який бекенд — це CRUD із додатковими правилами.</p>
+<pre><code class="language-bash"># Створюємо проєкт
+mkdir notes-api &amp;&amp; cd notes-api
+npm init -y
+npm pkg set type=module          # вмикаємо ES modules (import/export)
+npm install express zod
+npm install -D nodemon           # автоперезапуск при змінах (для розробки)</code></pre>
+<pre><code class="language-js">// src/app.mjs — повний CRUD для нотаток з in-memory масивом
+import express from "express";
+import { randomUUID } from "node:crypto";
+
+const app = express();
+
+// Middleware: розбирати JSON у тілі запиту і класти в req.body
+app.use(express.json());
+
+// "База даних" у пам'яті. Зникне після перезапуску — це нормально для навчання.
+let notes = [
+  { id: randomUUID(), title: "Вивчити event loop", done: false, createdAt: new Date().toISOString() },
+];
+
+// READ — усі нотатки (з фільтром ?done=true і лімітом ?limit=10)
+app.get("/notes", (req, res) =&gt; {
+  let result = notes;
+  if (req.query.done !== undefined) {
+    const done = req.query.done === "true";
+    result = result.filter((n) =&gt; n.done === done);
+  }
+  const limit = Number(req.query.limit ?? 100);
+  res.json(result.slice(0, limit)); // res.json = stringify + правильний Content-Type
+});
+
+// READ — одна нотатка за id (параметр шляху :id доступний у req.params)
+app.get("/notes/:id", (req, res) =&gt; {
+  const note = notes.find((n) =&gt; n.id === req.params.id);
+  if (!note) return res.status(404).json({ error: "Нотатку не знайдено" });
+  res.json(note);
+});
+
+// CREATE — нова нотатка
+app.post("/notes", (req, res) =&gt; {
+  const { title } = req.body;
+  if (typeof title !== "string" || title.trim() === "") {
+    return res.status(400).json({ error: "Поле title обов'язкове і має бути рядком" });
+  }
+  const note = { id: randomUUID(), title: title.trim(), done: false, createdAt: new Date().toISOString() };
+  notes.push(note);
+  res.status(201).json(note); // 201 + повертаємо створений ресурс (з id!)
+});
+
+// UPDATE — часткове оновлення (PATCH): змінюємо тільки передані поля
+app.patch("/notes/:id", (req, res) =&gt; {
+  const note = notes.find((n) =&gt; n.id === req.params.id);
+  if (!note) return res.status(404).json({ error: "Нотатку не знайдено" });
+
+  const { title, done } = req.body;
+  if (title !== undefined) note.title = String(title).trim();
+  if (done !== undefined) note.done = Boolean(done);
+  res.json(note);
+});
+
+// DELETE — видалити
+app.delete("/notes/:id", (req, res) =&gt; {
+  const before = notes.length;
+  notes = notes.filter((n) =&gt; n.id !== req.params.id);
+  if (notes.length === before) return res.status(404).json({ error: "Нотатку не знайдено" });
+  res.status(204).end(); // 204 No Content — успіх, тіла немає
+});
+
+// Якщо жоден маршрут не спрацював — 404 у JSON, а не HTML-сторінка Express
+app.use((req, res) =&gt; {
+  res.status(404).json({ error: `Маршрут ${req.method} ${req.path} не існує` });
+});
+
+const PORT = process.env.PORT ?? 3000;
+app.listen(PORT, () =&gt; console.log(`API на http://localhost:${PORT}`));</code></pre>
+<p>Порівняйте з версією на чистому <code>node:http</code>: зникли ручний парсинг URL, читання тіла шматками, <code>writeHead</code>. З'явились <code>req.params</code>, <code>req.query</code>, <code>req.body</code>, <code>res.json()</code>, <code>res.status()</code>. Ось за це ми і любимо фреймворки.</p>
+<p>Зверніть увагу на кілька <b>конвенцій REST</b> (REpresentational State Transfer — архітектурний стиль, який робить API передбачуваним):</p>
+<ul>
+  <li>Шляхи — <b>іменники у множині</b>: <code>/notes</code>, а не <code>/getNotes</code> чи <code>/note</code>. Дієслово — це метод HTTP.</li>
+  <li><code>POST /notes</code> повертає <b>201</b> і створений об'єкт разом із <code>id</code>, щоб клієнт міг одразу з ним працювати.</li>
+  <li><code>DELETE</code> повертає <b>204</b> без тіла. Повторний <code>DELETE</code> тієї самої нотатки — 404 (або, за іншою школою, знову 204: операція ідемпотентна).</li>
+  <li>Помилки завжди в <b>однаковому JSON-форматі</b> (<code>{ "error": "..." }</code>), щоб фронтенд обробляв їх одним кодом.</li>
+</ul>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>REST-конвенції — це не бюрократія, а спільна мова. Коли ваш колега-фронтендер бачить <code>GET /notes/:id</code>, він <i>без документації</i> знає: буде 200 із об'єктом або 404. Коли бачить <code>POST</code> — очікує 201 і тіло з <code>id</code>. Дотримання конвенцій економить години узгоджень. Детальніше — у розділі 09 про дизайн API, а поки що тримайтеся цих чотирьох правил.</p>
+</div>
+
+<h2 id="s6">6. Middleware, статуси, валідація, конфіг</h2>
+<h3>Middleware — конвеєр на кухні</h3>
+<p>На професійній кухні страва не готується однією людиною. Спершу замовлення реєструють (лог), потім перевіряють, чи є всі інгредієнти (парсинг і валідація), потім кухар готує (обробник маршруту), і наприкінці шеф перевіряє тарілку (обробка помилок). Кожна станція робить одну справу і передає далі. В Express така станція називається <b>middleware</b> (проміжний обробник) — функція з сигнатурою <code>(req, res, next)</code>. Вона може: щось зробити і викликати <code>next()</code> (передати далі), або сама відправити відповідь і не викликати <code>next()</code> (зупинити конвеєр).</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Конвеєр middleware в Express: логування, парсинг JSON, авторизація, обробник маршруту, обробник помилок">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="10" y="60" width="90" height="60" rx="12" class="blue"/>
+    <text x="55" y="86" text-anchor="middle" class="bold">Запит</text>
+    <text x="55" y="106" text-anchor="middle" class="muted">req</text>
+    <path d="M100 90 L140 90" class="arrow"/>
+
+    <rect x="140" y="50" width="120" height="80" rx="12" class="accent"/>
+    <text x="200" y="80" text-anchor="middle" class="bold">Логер</text>
+    <text x="200" y="100" text-anchor="middle" class="mono">next()</text>
+    <path d="M260 90 L300 90" class="arrow"/>
+
+    <rect x="300" y="50" width="120" height="80" rx="12" class="accent"/>
+    <text x="360" y="80" text-anchor="middle" class="bold">JSON-парсер</text>
+    <text x="360" y="100" text-anchor="middle" class="mono">next()</text>
+    <path d="M420 90 L460 90" class="arrow"/>
+
+    <rect x="460" y="50" width="120" height="80" rx="12" class="accent"/>
+    <text x="520" y="80" text-anchor="middle" class="bold">Авторизація</text>
+    <text x="520" y="100" text-anchor="middle" class="mono">next() / 401</text>
+    <path d="M580 90 L620 90" class="arrow"/>
+
+    <rect x="620" y="50" width="130" height="80" rx="12" class="green"/>
+    <text x="685" y="80" text-anchor="middle" class="bold">Обробник</text>
+    <text x="685" y="100" text-anchor="middle" class="mono">res.json()</text>
+
+    <path d="M520 130 L520 200" class="arrow dashed"/>
+    <text x="600" y="170" text-anchor="middle" class="small">без токена → 401, next() не викликається</text>
+    <rect x="460" y="200" width="120" height="50" rx="12" class="red"/>
+    <text x="520" y="230" text-anchor="middle" class="bold">401 Відповідь</text>
+
+    <path d="M685 130 L685 200" class="arrow dashed"/>
+    <text x="700" y="170" text-anchor="start" class="small">throw / next(err)</text>
+    <rect x="620" y="200" width="130" height="50" rx="12" class="purple"/>
+    <text x="685" y="222" text-anchor="middle" class="bold">Error handler</text>
+    <text x="685" y="240" text-anchor="middle" class="mono">(err, req, res, next)</text>
+
+    <text x="20" y="280" class="small">Порядок app.use(...) = порядок станцій. Обробник помилок має 4 аргументи і реєструється останнім.</text>
+  </svg>
+  <figcaption>Запит проходить станції конвеєра зліва направо. Будь-яка станція може завершити обробку відповіддю або передати помилку в error handler.</figcaption>
+</figure>
+
+<pre><code class="language-js">// src/middleware.mjs
+// 1. Логер: записує метод, шлях і час обробки
+export function logger(req, res, next) {
+  const start = Date.now();
+  // подія "finish" спрацьовує, коли відповідь повністю відправлена
+  res.on("finish", () =&gt; {
+    console.log(`${req.method} ${req.originalUrl} → ${res.statusCode} (${Date.now() - start} мс)`);
+  });
+  next(); // передати далі по конвеєру
+}
+
+// 2. Проста перевірка API-ключа (справжню автентифікацію розберемо в розділі 07)
+export function requireApiKey(req, res, next) {
+  if (req.headers["x-api-key"] !== process.env.API_KEY) {
+    return res.status(401).json({ error: "Немає або невірний API-ключ" }); // зупиняємо конвеєр
+  }
+  next();
+}
+
+// 3. Обробник помилок — ЧОТИРИ аргументи, Express впізнає його саме за кількістю
+export function errorHandler(err, req, res, next) {
+  console.error(err); // у продакшені — у систему логування, не в консоль
+  const status = err.status ?? 500;
+  res.status(status).json({
+    error: status === 500 ? "Внутрішня помилка сервера" : err.message, // не витікаємо деталі
+  });
+}</code></pre>
+<pre><code class="language-js">// у src/app.mjs — порядок має значення!
+import { logger, requireApiKey, errorHandler } from "./middleware.mjs";
+
+app.use(logger);          // 1. логуємо все
+app.use(express.json());  // 2. парсимо JSON
+app.use("/notes", requireApiKey); // 3. захищаємо тільки /notes
+// ... маршрути ...
+app.use(errorHandler);    // останній — ловить помилки з усіх обробників вище</code></pre>
+<p>Важлива деталь для Express 4: помилки з <code>async</code>-обробників не потрапляють в error handler автоматично — треба писати <code>try/catch</code> і викликати <code>next(err)</code>, або поставити пакет <code>express-async-errors</code>. В Express 5 (стабільний з 2024 року) відхилені проміси ловляться автоматично. Hono ловить їх «з коробки».</p>
+
+<h3>Статуси відповіді: як казати правду про результат</h3>
+<p>Статус — це перша річ, яку бачить клієнт. Він має бути чесним. Найпотрібніші:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Код</th><th>Назва</th><th>Коли використовувати</th></tr></thead>
+  <tbody>
+    <tr><td><b>200</b></td><td>OK</td><td>Успішний GET, PATCH, PUT — повертаємо дані</td></tr>
+    <tr><td><b>201</b></td><td>Created</td><td>POST створив ресурс; у тілі — створений об'єкт</td></tr>
+    <tr><td><b>204</b></td><td>No Content</td><td>Успіх без тіла: DELETE, іноді PUT</td></tr>
+    <tr><td><b>400</b></td><td>Bad Request</td><td>Клієнт надіслав некоректні дані (невалідний JSON, немає поля)</td></tr>
+    <tr><td><b>401</b></td><td>Unauthorized</td><td>Ми не знаємо, хто ви (немає/невірний токен). Насправді означає «не автентифіковано»</td></tr>
+    <tr><td><b>403</b></td><td>Forbidden</td><td>Ми знаємо, хто ви, але вам не можна (немає прав)</td></tr>
+    <tr><td><b>404</b></td><td>Not Found</td><td>Ресурс або маршрут не існує</td></tr>
+    <tr><td><b>409</b></td><td>Conflict</td><td>Конфлікт стану: email уже зайнятий, версія застаріла</td></tr>
+    <tr><td><b>422</b></td><td>Unprocessable Content</td><td>JSON валідний синтаксично, але не проходить бізнес-валідацію (часто замість 400)</td></tr>
+    <tr><td><b>429</b></td><td>Too Many Requests</td><td>Перевищено ліміт запитів (rate limit)</td></tr>
+    <tr><td><b>500</b></td><td>Internal Server Error</td><td>Наша помилка. Клієнт нічого не може з цим зробити</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Головне правило: <b>2xx — успіх, 4xx — винен клієнт, 5xx — винен сервер</b>. Найпоширеніший гріх — повертати 200 із <code>{ "success": false }</code> у тілі. Так фронтенд, проксі, кеші й моніторинг думають, що все добре, і помилки губляться.</p>
+
+<h3>Валідація вхідних даних із zod</h3>
+<p>Ніколи не довіряйте тому, що прийшло від клієнта. Гість може замовити «-5 порцій борщу» або «борщ, а ще видали всі рахунки». Ручні перевірки <code>typeof title === "string"</code> швидко перетворюються на кашу, тому використовують бібліотеку схем. <b>zod</b> — стандарт де-факто в TypeScript/JavaScript-світі: описуєте форму даних один раз, отримуєте і перевірку, і типи.</p>
+<pre><code class="language-js">// src/schemas.mjs
+import { z } from "zod";
+
+export const createNoteSchema = z.object({
+  title: z.string().trim().min(1, "Заголовок не може бути порожнім").max(200),
+  done: z.boolean().optional().default(false),
+});
+
+// Для PATCH усі поля необов'язкові, але хоча б одне має бути
+export const updateNoteSchema = createNoteSchema.partial().refine(
+  (data) =&gt; Object.keys(data).length &gt; 0,
+  { message: "Передайте хоча б одне поле для оновлення" }
+);
+
+// Універсальний middleware: перевіряє req.body за схемою
+export function validate(schema) {
+  return (req, res, next) =&gt; {
+    const result = schema.safeParse(req.body); // safeParse не кидає виняток
+    if (!result.success) {
+      return res.status(422).json({
+        error: "Некоректні дані",
+        details: result.error.issues.map((i) =&gt; ({ path: i.path.join("."), message: i.message })),
+      });
+    }
+    req.body = result.data; // очищені й приведені до типу дані (зайві поля відкинуті)
+    next();
+  };
+}</code></pre>
+<pre><code class="language-js">// у маршрутах — валідація як окрема станція конвеєра
+import { createNoteSchema, updateNoteSchema, validate } from "./schemas.mjs";
+
+app.post("/notes", validate(createNoteSchema), (req, res) =&gt; {
+  // тут req.body гарантовано { title: string, done: boolean }
+  const note = { id: randomUUID(), ...req.body, createdAt: new Date().toISOString() };
+  notes.push(note);
+  res.status(201).json(note);
+});
+
+app.patch("/notes/:id", validate(updateNoteSchema), (req, res) =&gt; { /* ... */ });</code></pre>
+
+<h3>Змінні оточення і конфіг</h3>
+<p>Порт, ключі до бази даних, секрети для токенів — це не код, а <b>налаштування середовища</b>. На вашому ноутбуці база на <code>localhost</code>, на продакшені — на іншому хості з іншим паролем. Такі значення читають зі <b>змінних оточення</b> (environment variables) через <code>process.env</code>. Для локальної розробки їх зручно тримати у файлі <code>.env</code>, який <b>ніколи не комітять у Git</b> — замість нього комітять <code>.env.example</code> з порожніми значеннями.</p>
+<pre><code class="language-bash"># .env  (додайте його в .gitignore!)
+PORT=3000
+API_KEY=dev-secret-123
+DATABASE_URL=postgres://user:pass@localhost:5432/notes</code></pre>
+<pre><code class="language-js">// src/config.mjs — єдине місце, де читаємо process.env, і одразу валідуємо
+import { z } from "zod";
+
+const envSchema = z.object({
+  PORT: z.coerce.number().default(3000),        // coerce: "3000" -&gt; 3000
+  API_KEY: z.string().min(8),
+  DATABASE_URL: z.string().url(),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+});
+
+// Node 20.6+ вміє читати .env без бібліотек: node --env-file=.env src/app.mjs
+export const config = envSchema.parse(process.env); // впаде при старті, якщо чогось бракує — і це добре</code></pre>
+<p>Ідея «впасти при старті» важлива: краще, щоб сервер не запустився взагалі з повідомленням «немає DATABASE_URL», ніж запустився і впав о третій ночі на першому запиті до бази.</p>
+
+<h2 id="s7">7. Структура проєкту та CORS</h2>
+<h3>Шари: routes → controllers → services → repositories</h3>
+<p>Поки нотаток одна сотня рядків, усе може жити в одному файлі. Але проєкти ростуть, і «все в app.mjs» перетворюється на кухню, де суп варять у мийці. Індустрія виробила стандартне розділення на <b>шари</b> (layers), кожен із яких відповідає за одне:</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Шари бекенд-застосунку: routes, controllers, services, repositories, база даних">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="220" height="50" rx="12" class="blue"/>
+    <text x="130" y="42" text-anchor="middle" class="bold">routes/</text>
+    <text x="130" y="60" text-anchor="middle" class="muted">який URL → який контролер</text>
+    <text x="260" y="50" class="small">«Меню»: GET /notes → notesController.list</text>
+
+    <path d="M130 70 L130 90" class="arrow"/>
+    <rect x="20" y="90" width="220" height="50" rx="12" class="accent"/>
+    <text x="130" y="112" text-anchor="middle" class="bold">controllers/</text>
+    <text x="130" y="130" text-anchor="middle" class="muted">HTTP ↔ звичайні функції</text>
+    <text x="260" y="120" class="small">«Офіціант»: дістати params/body, викликати сервіс, віддати статус і JSON</text>
+
+    <path d="M130 140 L130 160" class="arrow"/>
+    <rect x="20" y="160" width="220" height="50" rx="12" class="green"/>
+    <text x="130" y="182" text-anchor="middle" class="bold">services/</text>
+    <text x="130" y="200" text-anchor="middle" class="muted">бізнес-логіка</text>
+    <text x="260" y="190" class="small">«Кухар»: правила. Не знає про HTTP: жодних req/res</text>
+
+    <path d="M130 210 L130 230" class="arrow"/>
+    <rect x="20" y="230" width="220" height="50" rx="12" class="purple"/>
+    <text x="130" y="252" text-anchor="middle" class="bold">repositories/</text>
+    <text x="130" y="270" text-anchor="middle" class="muted">доступ до даних</text>
+    <text x="260" y="260" class="small">«Комірник»: findAll, findById, save. Тільки тут є SQL або масив</text>
+
+    <path d="M130 280 L130 300" class="arrow"/>
+    <rect x="20" y="300" width="220" height="24" rx="8" class="box-fill"/>
+    <text x="130" y="317" text-anchor="middle" class="mono">PostgreSQL / пам'ять / файл</text>
+    <text x="260" y="317" class="small">Замінити масив на Postgres = переписати один шар</text>
+  </svg>
+  <figcaption>Кожен шар знає лише про шар безпосередньо під собою. Контролер не пише SQL, репозиторій не знає про HTTP.</figcaption>
+</figure>
+
+<pre><code class="language-text">notes-api/
+├── src/
+│   ├── app.mjs                 # створення Express, підключення middleware і роутерів
+│   ├── server.mjs              # app.listen(config.PORT) — єдиний файл із побічним ефектом
+│   ├── config.mjs              # читання і валідація process.env
+│   ├── routes/notes.routes.mjs        # router.get("/", controller.list) ...
+│   ├── controllers/notes.controller.mjs
+│   ├── services/notes.service.mjs
+│   ├── repositories/notes.repository.mjs
+│   ├── schemas/notes.schema.mjs       # zod-схеми
+│   └── middleware/{logger,errorHandler,validate}.mjs
+├── tests/
+├── .env.example
+├── .gitignore                  # node_modules, .env
+└── package.json</code></pre>
+<pre><code class="language-js">// src/repositories/notes.repository.mjs — єдине місце, що знає, ДЕ лежать дані
+let notes = [];
+export const notesRepository = {
+  findAll: async () =&gt; [...notes],
+  findById: async (id) =&gt; notes.find((n) =&gt; n.id === id) ?? null,
+  create: async (note) =&gt; { notes.push(note); return note; },
+  remove: async (id) =&gt; { const len = notes.length; notes = notes.filter((n) =&gt; n.id !== id); return notes.length !== len; },
+};
+
+// src/services/notes.service.mjs — правила, без HTTP
+import { randomUUID } from "node:crypto";
+import { notesRepository } from "../repositories/notes.repository.mjs";
+
+export const notesService = {
+  async create({ title, done }) {
+    return notesRepository.create({ id: randomUUID(), title, done, createdAt: new Date().toISOString() });
+  },
+  async getOrThrow(id) {
+    const note = await notesRepository.findById(id);
+    if (!note) { const err = new Error("Нотатку не знайдено"); err.status = 404; throw err; }
+    return note;
+  },
+};
+
+// src/controllers/notes.controller.mjs — HTTP-обгортка
+import { notesService } from "../services/notes.service.mjs";
+export const notesController = {
+  async getOne(req, res, next) {
+    try { res.json(await notesService.getOrThrow(req.params.id)); }
+    catch (err) { next(err); }   // передаємо в errorHandler
+  },
+  async create(req, res, next) {
+    try { res.status(201).json(await notesService.create(req.body)); }
+    catch (err) { next(err); }
+  },
+};
+
+// src/routes/notes.routes.mjs — меню
+import { Router } from "express";
+import { notesController } from "../controllers/notes.controller.mjs";
+import { validate } from "../middleware/validate.mjs";
+import { createNoteSchema } from "../schemas/notes.schema.mjs";
+export const notesRouter = Router();
+notesRouter.get("/:id", notesController.getOne);
+notesRouter.post("/", validate(createNoteSchema), notesController.create);
+
+// src/app.mjs
+app.use("/notes", notesRouter);</code></pre>
+<p>Зверніть увагу: репозиторій уже <code>async</code>, хоча працює з масивом. Коли в розділі 05 ми замінимо масив на PostgreSQL, сервіси і контролери <b>не зміняться взагалі</b>. Це головна вигода шарів.</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Шарова структура — спрощена версія «чистої архітектури» (Clean Architecture) і гексагональної архітектури (Ports &amp; Adapters). Головна ідея в обох: бізнес-логіка в центрі не залежить від фреймворку, бази чи протоколу — це «порти», до яких підключаються «адаптери». Такий код легко тестувати (підмінили репозиторій на фейковий — сервіс тестується без бази) і легко переносити (замінили Express на Hono або HTTP на gRPC — сервіси не чіпаємо). NestJS, який часто зустрінете у вакансіях, — це Express/Fastify з примусово вбудованими шарами, модулями та впровадженням залежностей (dependency injection). Вивчивши шари «руками», ви зрозумієте, навіщо NestJS усі ці декоратори.</p>
+</div>
+
+<h3>CORS простими словами</h3>
+<p>Ваш фронтенд працює на <code>http://localhost:5173</code>, а API — на <code>http://localhost:3000</code>. Це <b>різні джерела</b> (origin = схема + хост + порт). Браузер має правило безпеки — <b>Same-Origin Policy</b>: JavaScript зі сторінки одного джерела не може читати відповіді від іншого джерела без дозволу. Інакше будь-який сайт міг би від вашого імені зробити запит до вашого банку і прочитати баланс.</p>
+<p><b>CORS</b> (Cross-Origin Resource Sharing) — механізм, яким <b>сервер</b> каже браузеру: «цьому джерелу я дозволяю читати мої відповіді». Дозвіл передається заголовком <code>Access-Control-Allow-Origin</code>. Для «небезпечних» запитів (методи PUT/DELETE, нестандартні заголовки, <code>Content-Type: application/json</code>) браузер спершу надсилає <b>preflight</b> — розвідувальний запит методом <code>OPTIONS</code>, і лише отримавши дозвіл, надсилає справжній запит.</p>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Послідовність CORS: браузер на одному origin надсилає preflight OPTIONS, сервер на іншому origin відповідає дозволом, потім іде справжній запит">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="220" height="56" rx="12" class="blue"/>
+    <text x="130" y="44" text-anchor="middle" class="bold">Браузер</text>
+    <text x="130" y="64" text-anchor="middle" class="mono">origin: http://localhost:5173</text>
+    <rect x="520" y="20" width="220" height="56" rx="12" class="green"/>
+    <text x="630" y="44" text-anchor="middle" class="bold">API-сервер</text>
+    <text x="630" y="64" text-anchor="middle" class="mono">origin: http://localhost:3000</text>
+
+    <line x1="130" y1="76" x2="130" y2="310" class="arrow dashed" style="marker-end:none"/>
+    <line x1="630" y1="76" x2="630" y2="310" class="arrow dashed" style="marker-end:none"/>
+
+    <path d="M130 110 L630 110" class="arrow"/>
+    <text x="380" y="100" text-anchor="middle" class="mono">1. OPTIONS /notes  (preflight)</text>
+    <text x="380" y="126" text-anchor="middle" class="small">Origin: http://localhost:5173 · Access-Control-Request-Method: POST</text>
+
+    <path d="M630 165 L130 165" class="arrow"/>
+    <text x="380" y="155" text-anchor="middle" class="mono">2. 204  Access-Control-Allow-Origin: http://localhost:5173</text>
+    <text x="380" y="181" text-anchor="middle" class="small">Access-Control-Allow-Methods: GET,POST,PATCH,DELETE · Allow-Headers: Content-Type</text>
+
+    <path d="M130 220 L630 220" class="arrow"/>
+    <text x="380" y="210" text-anchor="middle" class="mono">3. POST /notes  { "title": "..." }</text>
+
+    <path d="M630 265 L130 265" class="arrow"/>
+    <text x="380" y="255" text-anchor="middle" class="mono">4. 201  + Access-Control-Allow-Origin знову</text>
+
+    <rect x="20" y="285" width="720" height="34" rx="8" class="red"/>
+    <text x="380" y="307" text-anchor="middle" class="small">Без заголовка на кроці 2 або 4 браузер ЗАБЛОКУЄ читання відповіді, а в консолі буде «blocked by CORS policy»</text>
+  </svg>
+  <figcaption>CORS — це дозвіл, який видає сервер, а перевіряє браузер. curl і Postman CORS не перевіряють, тому «у Postman працює, а в браузері ні».</figcaption>
+</figure>
+
+<pre><code class="language-js">// npm install cors
+import cors from "cors";
+
+// Розробка: дозволити конкретний origin фронтенду
+app.use(cors({
+  origin: ["http://localhost:5173", "https://myapp.example.com"], // ніколи не "*" з credentials
+  methods: ["GET", "POST", "PATCH", "DELETE"],
+  credentials: true, // якщо надсилаєте cookie
+}));</code></pre>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>CORS — не захист сервера.</b> Це захист <i>користувача браузера</i> від чужих сайтів. Зловмисник із curl зробить будь-який запит незалежно від CORS. Авторизація має бути окремо.</li>
+    <li><b><code>origin: "*"</code> у продакшені</b> — дозволити всім читати відповіді. Для публічного read-only API нормально, для чогось із cookie або токенами — ні (браузер до того ж заборонить <code>*</code> разом із <code>credentials: true</code>).</li>
+    <li><b>Preflight на кожен запит</b> уповільнює API. Заголовок <code>Access-Control-Max-Age</code> дозволяє браузеру кешувати дозвіл.</li>
+  </ul>
+</div>
+
+<h2 id="s8">8. Тестування API і типові помилки</h2>
+<h3>Три способи «пощупати» API</h3>
+<p><b>curl</b> — консольна утиліта, є всюди, ідеальна для швидких перевірок і скриптів:</p>
+<pre><code class="language-bash"># GET із гарним виводом JSON (потрібен jq: brew install jq)
+curl -s http://localhost:3000/notes | jq
+
+# POST із заголовками, -i показує статус і заголовки відповіді
+curl -i -X POST http://localhost:3000/notes \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dev-secret-123" \
+  -d '{"title":"Написати тести"}'
+
+# PATCH і DELETE
+curl -X PATCH http://localhost:3000/notes/&lt;id&gt; -H "Content-Type: application/json" -d '{"done":true}'
+curl -i -X DELETE http://localhost:3000/notes/&lt;id&gt;</code></pre>
+<p><b>Postman</b> (або відкритий аналог Bruno, Insomnia) — графічний клієнт: колекції запитів, змінні середовища (<code>{{baseUrl}}</code>), автотести на відповідь, можливість поділитися колекцією з командою. Для великих API — стандарт.</p>
+<p><b>REST Client</b> — розширення VS Code: пишете запити в файлі <code>api.http</code> прямо в репозиторії, натискаєте «Send Request». Плюс — запити версіонуються в Git разом із кодом:</p>
+<pre><code class="language-http">### api.http — розширення REST Client для VS Code
+@baseUrl = http://localhost:3000
+@apiKey = dev-secret-123
+
+### Список нотаток
+GET {{baseUrl}}/notes?done=false
+x-api-key: {{apiKey}}
+
+### Створити
+POST {{baseUrl}}/notes
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{ "title": "Купити молоко" }
+
+### Невалідні дані — очікуємо 422
+POST {{baseUrl}}/notes
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{ "title": "" }</code></pre>
+<p>Автоматичні тести (Vitest + supertest) розберемо в розділі 10. Але вже зараз корисна звичка: до кожного маршруту мати приклад «щасливого» запиту і хоча б одного помилкового.</p>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Розкладіть <code>app.mjs</code> із розділу 5 на шари за структурою з розділу 7. Переконайтесь, що <code>curl</code>-команди вище працюють так само.</li>
+    <li>Додайте валідацію zod до <code>PATCH</code> і перевірте, що <code>{ "done": "так" }</code> повертає 422 з описом помилки.</li>
+    <li>Створіть <code>index.html</code> з <code>fetch("http://localhost:3000/notes")</code>, відкрийте його через <code>npx serve</code> (буде інший порт) і подивіться на CORS-помилку в консолі. Потім підключіть <code>cors</code> і побачте, як вона зникає.</li>
+    <li>Напишіть middleware, що додає заголовок <code>X-Request-Id</code> із <code>randomUUID()</code> до кожної відповіді, і виводьте цей id у логері. Так роблять у справжніх системах, щоб знайти запит у логах.</li>
+    <li>Навмисно заблокуйте event loop: додайте маршрут <code>GET /slow</code> із циклом на 5 секунд і паралельно у другому терміналі викликайте <code>GET /notes</code>. Відчуйте на власному досвіді, що таке «офіціант, що стоїть біля плити».</li>
+  </ol>
+</div>
+
+<h3>Типові помилки новачків на бекенді</h3>
+<ol>
+  <li><b>Блокування event loop.</b> Синхронні операції, важкі обчислення, <code>JSON.parse</code> величезних рядків у обробнику запиту. Ліки: асинхронні API, <code>worker_threads</code>, винесення в чергу задач (розділ 13).</li>
+  <li><b>Відсутність обробки помилок.</b> Один <code>throw</code> без <code>catch</code> у callback — і процес Node падає повністю, для всіх користувачів. Ліки: центральний error handler, <code>process.on("unhandledRejection")</code> для логування, менеджер процесів (pm2, Docker restart) для перезапуску.</li>
+  <li><b>Довіра до вхідних даних.</b> <code>notes[req.params.id]</code>, підстановка <code>req.body</code> цілком в об'єкт (клієнт додасть <code>isAdmin: true</code>), SQL із конкатенацією рядків. Ліки: zod-схеми, що відкидають зайві поля, параметризовані запити (розділ 05).</li>
+  <li><b>Секрети в коді.</b> Пароль від бази у <code>app.mjs</code>, закомічений у GitHub. Ліки: <code>.env</code> + <code>.gitignore</code>, у продакшені — секрети платформи.</li>
+  <li><b>Неправильні статуси.</b> 200 на помилку, 500 на невалідні дані, 404 замість 401. Ліки: таблиця з розділу 6 і чесність.</li>
+  <li><b>Логіка в контролерах.</b> Через півроку в одному обробнику 300 рядків із SQL, відправкою email і розрахунком знижок. Ліки: шари.</li>
+  <li><b>Зберігання стану в пам'яті процесу</b> для чогось важливого. Наш масив <code>notes</code> зникає при перезапуску і не працює, якщо запущено два екземпляри сервера. Це нормально для навчання і абсолютно ненормально для продакшену — тому наступний розділ про бази даних.</li>
+</ol>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Чим відрізняється сервер «фізичний» від «логічного»?</summary><p>Фізичний — комп'ютер (залізо в дата-центрі або ваш ноутбук). Логічний — програма, яка слухає порт і відповідає на запити. На одному фізичному сервері може працювати багато логічних (веб-сервер, база, кеш) на різних портах.</p></details>
+  <details><summary>2. Чому Node.js в одному потоці встигає обслужити тисячі клієнтів?</summary><p>Завдяки event loop: довгі операції введення-виведення (мережа, диск, база) віддаються libuv і операційній системі, а потік JavaScript тим часом обробляє інші запити. Він повертається до операції, коли та завершилась, через чергу подій. Це працює, поки сам JavaScript-код не виконує довгих синхронних обчислень.</p></details>
+  <details><summary>3. Що виведе код: <code>setTimeout(() =&gt; console.log("A"), 0); console.log("B");</code></summary><p>Спочатку «B», потім «A». Навіть із затримкою 0 мс callback потрапляє у чергу подій і виконається лише після завершення поточного синхронного коду.</p></details>
+  <details><summary>4. Які статуси мають повертати успішні POST, DELETE і запит неіснуючого ресурсу?</summary><p>POST, що створив ресурс — 201 Created з об'єктом у тілі. DELETE — 204 No Content без тіла. Неіснуючий ресурс — 404 Not Found. А 200 з <code>{ success: false }</code> — антипатерн.</p></details>
+  <details><summary>5. Чим 401 відрізняється від 403?</summary><p>401 Unauthorized — «ми не знаємо, хто ви»: немає або невірний токен, потрібна автентифікація. 403 Forbidden — «ми знаємо, хто ви, але вам не дозволено»: не вистачає прав.</p></details>
+  <details><summary>6. Що таке middleware і чому важливий порядок їх реєстрації?</summary><p>Middleware — функція <code>(req, res, next)</code>, станція на конвеєрі обробки запиту. Виконуються в порядку <code>app.use()</code>. Якщо зареєструвати роутер до <code>express.json()</code>, у обробниках <code>req.body</code> буде <code>undefined</code>; обробник помилок (4 аргументи) має бути останнім, інакше не зловить помилки з маршрутів нижче.</p></details>
+  <details><summary>7. Чому «у Postman працює, а в браузері помилка CORS»?</summary><p>CORS перевіряє тільки браузер, захищаючи користувача від чужих сайтів. Postman і curl не є браузерами і на заголовок <code>Access-Control-Allow-Origin</code> не дивляться. Щоб працювало в браузері, сервер має явно дозволити origin фронтенду.</p></details>
+  <details><summary>8. Навіщо шар repositories, якщо сервіс може сам зробити запит до бази?</summary><p>Щоб бізнес-логіка не залежала від способу зберігання. Заміна масиву на PostgreSQL або підміна на фейковий репозиторій у тестах не торкається сервісів і контролерів. Кожен шар знає лише про шар під собою.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>Бекенд — «кухня»: усе, що клієнт не бачить, але від чого залежить результат. Перевірка прав, розрахунки і секрети живуть тільки тут.</li>
+  <li>Node.js — рантайм для JavaScript (V8 + libuv). Один потік JS + event loop: довгі I/O-операції не блокують, довгі обчислення — блокують усіх.</li>
+  <li>Маршрут = метод + шлях. Дані приходять через параметри шляху (<code>/notes/:id</code>), query (<code>?limit=5</code>) і тіло (JSON).</li>
+  <li>REST-конвенції: іменники в множині, POST → 201 з об'єктом, DELETE → 204, помилки в єдиному JSON-форматі, 4xx — винен клієнт, 5xx — сервер.</li>
+  <li>Middleware — конвеєр <code>(req, res, next)</code>; порядок реєстрації = порядок виконання; error handler має 4 аргументи і стоїть останнім.</li>
+  <li>Ніколи не довіряйте вхідним даним: валідуйте схемою (zod), відкидайте зайві поля, повертайте 400/422 з поясненням.</li>
+  <li>Конфіг і секрети — у змінних оточення (<code>.env</code> у <code>.gitignore</code>), валідуйте їх при старті.</li>
+  <li>Шари routes → controllers → services → repositories: кожен знає лише про сусіда знизу; це робить код тестованим і замінюваним.</li>
+  <li>CORS — дозвіл від сервера, який перевіряє браузер. Це захист користувача, а не сервера.</li>
+  <li>Перевіряйте API через curl, Postman/Bruno або REST Client; тримайте приклади запитів у репозиторії.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://nodejs.org/docs/latest/api/" target="_blank" rel="noopener">Node.js API Documentation</a> — офіційна документація: <code>http</code>, <code>fs</code>, <code>crypto</code>, <code>worker_threads</code>. Звіряйтеся тут, а не з випадковими блогами.</li>
+    <li><a href="https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick" target="_blank" rel="noopener">The Node.js Event Loop, Timers, and process.nextTick()</a> — офіційний гайд про event loop із фазами циклу. Обов'язково після цього розділу.</li>
+    <li><a href="https://expressjs.com/en/guide/routing.html" target="_blank" rel="noopener">Express: Routing</a> та <a href="https://expressjs.com/en/guide/using-middleware.html" target="_blank" rel="noopener">Using middleware</a> — два ключові розділи документації Express; там же <a href="https://expressjs.com/en/guide/error-handling.html" target="_blank" rel="noopener">Error handling</a>.</li>
+    <li><a href="https://hono.dev/docs/" target="_blank" rel="noopener">Hono Documentation</a> — сучасна альтернатива Express, яка працює в Node, Bun, Deno і Cloudflare Workers. Порівняйте їхній «Getting started» з нашим кодом.</li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP" target="_blank" rel="noopener">MDN: HTTP</a> — методи, статуси, заголовки, <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS" target="_blank" rel="noopener">CORS</a> з діаграмами. Довідник, до якого повертатиметесь роками.</li>
+    <li><a href="https://restfulapi.net/" target="_blank" rel="noopener">restfulapi.net</a> — доступне пояснення принципів REST, іменування ресурсів і використання методів/статусів.</li>
+    <li><a href="https://roadmap.sh/backend" target="_blank" rel="noopener">roadmap.sh — Backend Developer Roadmap</a> — карта всього, що має знати бекенд-розробник; корисно, щоб бачити, куди рухатися після цього посібника.</li>
+    <li><a href="https://roadmap.sh/nodejs" target="_blank" rel="noopener">roadmap.sh — Node.js Roadmap</a> — деталізована карта саме Node-екосистеми.</li>
+    <li><a href="https://zod.dev/" target="_blank" rel="noopener">zod.dev</a> — документація zod: типи, <code>refine</code>, <code>transform</code>, інтеграція з TypeScript.</li>
+    <li><a href="https://learning.postman.com/docs/introduction/overview/" target="_blank" rel="noopener">Postman Learning Center</a> — як організовувати колекції, змінні середовища і писати тести на відповіді.</li>
+    <li><a href="https://marketplace.visualstudio.com/items?itemName=humao.rest-client" target="_blank" rel="noopener">REST Client для VS Code</a> — розширення для <code>.http</code>-файлів у репозиторії.</li>
+    <li><a href="https://github.com/goldbergyoni/nodebestpractices" target="_blank" rel="noopener">Node.js Best Practices (goldbergyoni)</a> — найповніша збірка практик для продакшен-Node: структура, обробка помилок, безпека, тестування.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 04</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

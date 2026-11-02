@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>06. NoSQL: MongoDB, Redis і ко — Fullstack для чайників</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout">
+<nav id="sidebar" aria-label="Зміст"></nav>
+<main>
+
+<header class="chapter-head">
+  <div class="kicker">Розділ 06 · <span class="level-badge level-1">Новачок</span></div>
+  <h1>NoSQL: MongoDB, Redis і ко</h1>
+  <p class="lead">Після цього розділу ви зрозумієте, чому з'явилися бази «не SQL», які вони бувають, коли брати MongoDB, а коли Redis, і як у реальній системі Postgres, Redis та Elasticsearch працюють разом.</p>
+  <div class="meta"><span>⏱ ~100 хв</span><span>📚 Передумови: розділи 04–05</span><span>🎯 Ціль: кеш і rate limiter на Redis, CRUD на MongoDB</span></div>
+</header>
+
+<div class="toc">
+  <div class="title">У цьому розділі</div>
+  <ol>
+    <li><a href="#s1">Що таке NoSQL і чому воно з'явилось</a></li>
+    <li><a href="#s2">Типи NoSQL-баз: таксономія</a></li>
+    <li><a href="#s3">MongoDB: документи, колекції, CRUD</a></li>
+    <li><a href="#s4">Redis: структури даних, кеш, rate limiter, pub/sub</a></li>
+    <li><a href="#s5">SQL проти NoSQL: порівняння і CAP-теорема</a></li>
+    <li><a href="#s6">Polyglot persistence: кілька баз в одній системі</a></li>
+    <li><a href="#s7">Типові помилки</a></li>
+  </ol>
+</div>
+
+<div class="box kid">
+  <div class="title">Пояснення для п'ятирічного</div>
+  <p>У минулому розділі ми складали речі в шафу з підписаними шухлядами, де у кожній шухляді картки одного розміру — це SQL. Але не все зручно класти в однакові картки. Кулінарний рецепт з інгредієнтами, кроками і фото зручніше тримати як <b>одну товсту папку</b> — це <b>MongoDB</b>, документна база. А є речі, які треба діставати <b>миттєво</b>, як цукерки з кишені: «скільки людей зараз онлайн», «чи вже заходив цей гість хвилину тому» — це <b>Redis</b>, база в оперативній пам'яті. А пошук слова у всіх книжках бібліотеки зручно робити за окремим <b>покажчиком слів</b> — це <b>Elasticsearch</b>. NoSQL — це не «краще за шафу», а <b>інші місця для інших речей</b>. Дорослі інженери використовують шафу, папки, кишеню і покажчик разом.</p>
+</div>
+
+<h2 id="s1">1. Що таке NoSQL і чому воно з'явилось</h2>
+<p><b>NoSQL</b> — це не одна технологія, а парасолькова назва для баз даних, які <i>не</i> є класичними реляційними. Спершу термін означав «No SQL» — без мови SQL, а згодом його переосмислили як «Not Only SQL» — не тільки SQL. Це важливий нюанс: NoSQL з'явився не замість реляційних баз, а поруч із ними.</p>
+<p>Реляційні бази проєктувалися у 1970–80-х для одного великого сервера. У середині 2000-х Google, Amazon і Facebook зіткнулися з двома проблемами, які не вирішувалися «купити сервер потужніший»:</p>
+<ol>
+  <li><b>Масштаб.</b> Дані перестали вміщатися на одну машину. Розкласти реляційну базу зі зв'язками й транзакціями по сотні серверів (горизонтальне масштабування, sharding) — надзвичайно складно: JOIN між таблицями на різних машинах повільний, транзакції через мережу — ще повільніші. Google написав Bigtable, Amazon — Dynamo, і обидві системи свідомо відмовилися від JOIN і глобальних транзакцій заради розподілу по тисячах вузлів.</li>
+  <li><b>Гнучкість схеми.</b> У реляційній базі кожна колонка оголошена заздалегідь. Коли продукт змінюється щотижня, а в кожного користувача «профіль» із різним набором полів, суворі міграції стають гальмом. Документні бази дозволили зберігати об'єкти «як є» — у форматі, дуже схожому на JSON.</li>
+</ol>
+<p>До цього додалась третя причина, приземленіша: <b>швидкість для окремих задач</b>. Кеш, лічильники, сесії, черги — для них не потрібні ні таблиці, ні транзакції, потрібна лише мілісекундна відповідь. Так з'явився Redis. І четверта: <b>повнотекстовий пошук</b>, де реляційна база з <code>LIKE '%слово%'</code> безнадійно повільна, — Elasticsearch.</p>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Найчастіша помилка джуніора — думати, що NoSQL «сучасніший» і тому кращий, або навпаки — що це «іграшка без транзакцій». Насправді вибір бази — це вибір компромісу: що ви віддаєте (зв'язки, транзакції, суворість) і що отримуєте (масштаб, гнучкість, швидкість). Розуміння цих компромісів відрізняє інженера від людини, яка копіює стек із туторіалу.</p>
+</div>
+
+<h2 id="s2">2. Типи NoSQL-баз: таксономія</h2>
+<p>NoSQL-бази групують за тим, <i>як</i> вони зберігають дані. П'ять основних сімейств:</p>
+
+<figure>
+  <svg viewBox="0 0 760 420" role="img" aria-label="Таксономія NoSQL-баз: документні, ключ-значення, колонкові, графові, пошукові — з прикладами систем та типовими задачами">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="290" y="20" width="180" height="46" rx="12" class="accent"/>
+    <text x="380" y="48" text-anchor="middle" class="bold">NoSQL</text>
+
+    <path d="M320 66 L90 110" class="arrow"/>
+    <path d="M350 66 L235 110" class="arrow"/>
+    <path d="M380 66 L380 110" class="arrow"/>
+    <path d="M410 66 L525 110" class="arrow"/>
+    <path d="M440 66 L670 110" class="arrow"/>
+
+    <rect x="15" y="110" width="150" height="120" rx="12" class="blue"/>
+    <text x="90" y="134" text-anchor="middle" class="bold">Документні</text>
+    <text x="90" y="154" text-anchor="middle" class="mono small">{ JSON-подібні }</text>
+    <text x="90" y="176" text-anchor="middle" class="small">MongoDB, CouchDB,</text>
+    <text x="90" y="192" text-anchor="middle" class="small">Firestore</text>
+    <text x="90" y="216" text-anchor="middle" class="muted">каталоги, профілі, CMS</text>
+
+    <rect x="160" y="110" width="150" height="120" rx="12" class="green"/>
+    <text x="235" y="134" text-anchor="middle" class="bold">Ключ-значення</text>
+    <text x="235" y="154" text-anchor="middle" class="mono small">key → value</text>
+    <text x="235" y="176" text-anchor="middle" class="small">Redis, DynamoDB,</text>
+    <text x="235" y="192" text-anchor="middle" class="small">Memcached</text>
+    <text x="235" y="216" text-anchor="middle" class="muted">кеш, сесії, лічильники</text>
+
+    <rect x="305" y="110" width="150" height="120" rx="12" class="purple"/>
+    <text x="380" y="134" text-anchor="middle" class="bold">Колонкові</text>
+    <text x="380" y="154" text-anchor="middle" class="mono small">wide-column</text>
+    <text x="380" y="176" text-anchor="middle" class="small">Cassandra, HBase,</text>
+    <text x="380" y="192" text-anchor="middle" class="small">ScyllaDB</text>
+    <text x="380" y="216" text-anchor="middle" class="muted">логи, метрики, IoT</text>
+
+    <rect x="450" y="110" width="150" height="120" rx="12" class="red"/>
+    <text x="525" y="134" text-anchor="middle" class="bold">Графові</text>
+    <text x="525" y="154" text-anchor="middle" class="mono small">вузли + ребра</text>
+    <text x="525" y="176" text-anchor="middle" class="small">Neo4j, Amazon</text>
+    <text x="525" y="192" text-anchor="middle" class="small">Neptune</text>
+    <text x="525" y="216" text-anchor="middle" class="muted">соцмережі, рекомендації</text>
+
+    <rect x="595" y="110" width="150" height="120" rx="12" class="accent"/>
+    <text x="670" y="134" text-anchor="middle" class="bold">Пошукові</text>
+    <text x="670" y="154" text-anchor="middle" class="mono small">інвертований індекс</text>
+    <text x="670" y="176" text-anchor="middle" class="small">Elasticsearch,</text>
+    <text x="670" y="192" text-anchor="middle" class="small">OpenSearch, Meilisearch</text>
+    <text x="670" y="216" text-anchor="middle" class="muted">повнотекстовий пошук</text>
+
+    <rect x="15" y="260" width="730" height="145" rx="12" class="box-fill"/>
+    <text x="30" y="284" class="small bold">Як обирати (питання до задачі):</text>
+    <text x="30" y="306" class="small">• Дані — це вкладені об'єкти з різним набором полів, і ви завжди читаєте їх цілком? → документна</text>
+    <text x="30" y="326" class="small">• Потрібно за мілісекунду дістати щось за відомим ключем, і дані можуть зникнути? → ключ-значення</text>
+    <text x="30" y="346" class="small">• Мільярди записів, пишете набагато більше, ніж читаєте, запити прості й передбачувані? → колонкова</text>
+    <text x="30" y="366" class="small">• Головне питання — «хто з ким пов'язаний через кого» на глибину 3–6 кроків? → графова</text>
+    <text x="30" y="386" class="small">• «Знайти всі товари, де в описі є слово з одруком, і ранжувати за релевантністю» → пошукова</text>
+  </svg>
+  <figcaption>П'ять сімейств NoSQL. Кожне оптимізовано під свою форму даних і свій тип запитів — і саме тому жодне не замінює всі інші.</figcaption>
+</figure>
+
+<p>Коротко про кожне:</p>
+<ul>
+  <li><b>Документні</b> (document stores). Одиниця зберігання — документ, тобто вкладена структура «ключ-значення», практично JSON. Документи групуються в колекції. Різні документи однієї колекції можуть мати різні поля. Найпопулярніша — <b>MongoDB</b>.</li>
+  <li><b>Ключ-значення</b> (key-value). Найпростіша модель: за ключем-рядком лежить значення. Максимально швидко, бо база не розуміє структуру значення (або розуміє мінімально). <b>Redis</b> — в оперативній пам'яті, надшвидкий; <b>DynamoDB</b> — керований сервіс AWS з безмежним масштабом на диску.</li>
+  <li><b>Колонкові</b> (wide-column). Виглядають як таблиці, але кожен рядок може мати свій набір колонок, а дані зберігаються по колонках і розподіляються по вузлах за ключем партиції. <b>Cassandra</b> витримує мільйони записів на секунду, ціною обмежених запитів (немає JOIN, фільтрувати можна лише за ключем).</li>
+  <li><b>Графові</b> (graph). Зберігають вузли (люди, товари) і ребра (дружить, купив). Запит «друзі друзів, які купили те, що купив я» у SQL — п'ять JOIN, у <b>Neo4j</b> — один рядок мовою Cypher.</li>
+  <li><b>Пошукові</b> (search engines). Будують інвертований індекс: для кожного слова — список документів, де воно є. <b>Elasticsearch</b> робить повнотекстовий пошук з морфологією, одруками, фасетами й ранжуванням, що неможливо в SQL з <code>LIKE</code>.</li>
+</ul>
+<p>Є ще <b>часові ряди</b> (InfluxDB, TimescaleDB — останній є розширенням Postgres) і <b>векторні</b> (Pinecone, pgvector) для AI-подібності, але їх зазвичай розглядають як спеціалізації колонкових або реляційних.</p>
+
+<h2 id="s3">3. MongoDB: документи, колекції, CRUD</h2>
+<h3>Документи, колекції, BSON</h3>
+<p>У MongoDB замість таблиці — <b>колекція</b> (collection), замість рядка — <b>документ</b> (document), замість колонок — <b>поля</b> (fields), які можуть бути вкладеними об'єктами та масивами. Документ зберігається у форматі <b>BSON</b> (Binary JSON) — бінарному JSON з додатковими типами: <code>ObjectId</code>, <code>Date</code>, <code>Decimal128</code>, бінарні дані. Ідентифікатор <code>_id</code> створюється автоматично і є первинним ключем.</p>
+<pre><code class="language-js">// Один документ у колекції "posts". Зверніть увагу: автор і теги ВБУДОВАНІ прямо в документ
+{
+  _id: ObjectId("66e0a1b2c3d4e5f6a7b8c9d0"),
+  title: "Про котів",
+  slug: "pro-kotiv",
+  body: "Коти — це...",
+  author: { id: ObjectId("..."), name: "Анна" },       // вкладений об'єкт
+  tags: ["коти", "тварини"],                            // масив
+  comments: [                                           // масив вкладених документів
+    { userName: "Богдан", body: "Клас!", createdAt: ISODate("2026-09-01T10:00:00Z") }
+  ],
+  stats: { views: 1520, likes: 42 },
+  published: true,
+  createdAt: ISODate("2026-08-30T08:00:00Z")
+}</code></pre>
+<p>Один документ = усе, що потрібно для сторінки поста. Один запит замість п'яти JOIN. Це головна перевага документної моделі: <b>дані зберігаються так, як застосунок їх читає</b>.</p>
+
+<h3>Запуск і CRUD із офіційним драйвером</h3>
+<pre><code class="language-bash">docker run --name mongo -p 27017:27017 -d mongo:7
+npm install mongodb</code></pre>
+<pre><code class="language-js">// src/mongo.mjs
+import { MongoClient, ObjectId } from "mongodb";
+
+const client = new MongoClient(process.env.MONGO_URL ?? "mongodb://localhost:27017");
+await client.connect();                       // драйвер сам тримає пул з'єднань
+const db = client.db("blog");
+const posts = db.collection("posts");         // колекція створюється при першому записі
+
+// CREATE
+const { insertedId } = await posts.insertOne({
+  title: "Про котів",
+  slug: "pro-kotiv",
+  author: { name: "Анна" },
+  tags: ["коти"],
+  comments: [],
+  stats: { views: 0, likes: 0 },
+  published: true,
+  createdAt: new Date(),
+});
+
+// READ — фільтр як об'єкт, проєкція обирає поля (як SELECT конкретних колонок)
+const published = await posts
+  .find({ published: true, tags: "коти" })              // "коти" є в масиві tags
+  .project({ title: 1, slug: 1, "author.name": 1 })      // 1 = включити
+  .sort({ createdAt: -1 })                               // -1 = за спаданням
+  .limit(10)
+  .toArray();
+
+const one = await posts.findOne({ _id: new ObjectId(insertedId) });
+
+// UPDATE — оператори: $set, $inc, $push, $pull, $unset ...
+await posts.updateOne(
+  { _id: insertedId },
+  {
+    $inc: { "stats.views": 1 },                                          // атомарно +1
+    $push: { comments: { userName: "Богдан", body: "Клас!", createdAt: new Date() } },
+    $set: { updatedAt: new Date() },
+  }
+);
+
+// Оператори порівняння у фільтрах: $gt, $gte, $lt, $in, $regex, $exists
+const recent = await posts.find({ createdAt: { $gte: new Date(Date.now() - 7 * 86400e3) } }).toArray();
+
+// DELETE
+await posts.deleteOne({ _id: insertedId });
+
+// Індекси — така сама необхідність, як у Postgres
+await posts.createIndex({ slug: 1 }, { unique: true });
+await posts.createIndex({ published: 1, createdAt: -1 });   // складений під запит вище
+await posts.createIndex({ title: "text", body: "text" });   // простий повнотекстовий</code></pre>
+<p>Популярна обгортка над драйвером — <b>Mongoose</b>. Вона додає <i>схеми</i> (так, у «безсхемній» базі!) з валідацією типів, хуками, віртуальними полями і зручнішим API. Більшість команд використовує саме Mongoose: гнучкість Mongo без хаосу.</p>
+<pre><code class="language-js">// Mongoose: схема на рівні застосунку
+import mongoose from "mongoose";
+
+const postSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true, maxlength: 200 },
+  slug:  { type: String, required: true, unique: true },
+  author: { name: { type: String, required: true } },
+  tags: [String],
+  stats: { views: { type: Number, default: 0 } },
+  published: { type: Boolean, default: false },
+}, { timestamps: true });                  // автоматично createdAt / updatedAt
+
+const Post = mongoose.model("Post", postSchema);
+await Post.create({ title: "Про SQL", slug: "pro-sql", author: { name: "Богдан" } });
+const list = await Post.find({ published: true }).sort("-createdAt").limit(10).lean();</code></pre>
+
+<h3>Embedding чи referencing: головне рішення при моделюванні</h3>
+<p>У SQL ви завжди розкладаєте дані по таблицях і з'єднуєте JOIN. У MongoDB щоразу є вибір: <b>вбудувати</b> (embed) пов'язані дані всередину документа або <b>посилатись</b> (reference) на них за <code>_id</code>, як зовнішнім ключем.</p>
+
+<figure>
+  <svg viewBox="0 0 760 340" role="img" aria-label="Порівняння embedding і referencing у MongoDB: вбудовані коментарі всередині поста проти окремої колекції коментарів з посиланням postId">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <text x="20" y="28" class="bold">Embedding — усе в одному документі</text>
+    <rect x="20" y="40" width="330" height="150" rx="12" class="blue"/>
+    <text x="35" y="64" class="mono small">posts: {</text>
+    <text x="50" y="82" class="mono small">_id, title, body,</text>
+    <text x="50" y="100" class="mono small">author: { name: "Анна" },</text>
+    <text x="50" y="118" class="mono small">comments: [</text>
+    <text x="65" y="136" class="mono small">{ user: "Богдан", body: "Клас!" },</text>
+    <text x="65" y="154" class="mono small">{ user: "Віра", body: "Згодна" } ]</text>
+    <text x="35" y="176" class="mono small">}</text>
+    <text x="20" y="214" class="small">+ один запит на всю сторінку, атомарне оновлення</text>
+    <text x="20" y="232" class="small">− документ росте (ліміт 16 МБ), ім'я автора продубльовано</text>
+    <text x="20" y="250" class="small">Коли: «мало і завжди разом» — адреса, налаштування,</text>
+    <text x="20" y="268" class="small">кілька останніх коментарів</text>
+
+    <text x="400" y="28" class="bold">Referencing — окремі колекції</text>
+    <rect x="400" y="40" width="160" height="90" rx="12" class="green"/>
+    <text x="415" y="64" class="mono small">posts: {</text>
+    <text x="430" y="82" class="mono small">_id: P1, title,</text>
+    <text x="430" y="100" class="mono small">authorId: U7</text>
+    <text x="415" y="118" class="mono small">}</text>
+    <rect x="580" y="40" width="160" height="90" rx="12" class="purple"/>
+    <text x="595" y="64" class="mono small">users: {</text>
+    <text x="610" y="82" class="mono small">_id: U7,</text>
+    <text x="610" y="100" class="mono small">name: "Анна"</text>
+    <text x="595" y="118" class="mono small">}</text>
+    <path d="M560 100 L580 100" class="arrow"/>
+    <rect x="400" y="150" width="340" height="60" rx="12" class="accent"/>
+    <text x="415" y="172" class="mono small">comments: { _id, postId: P1, userId: U7, body }</text>
+    <text x="415" y="192" class="mono small">comments: { _id, postId: P1, userId: U9, body }</text>
+    <path d="M480 150 L480 130" class="arrow"/>
+    <text x="400" y="234" class="small">+ без дублювання, документи не ростуть, необмежена кількість</text>
+    <text x="400" y="252" class="small">− 2–3 запити або $lookup (повільніший, ніж SQL JOIN)</text>
+    <text x="400" y="270" class="small">Коли: «багато і окремо» — тисячі коментарів, автори,</text>
+    <text x="400" y="288" class="small">дані, які оновлюються незалежно</text>
+
+    <rect x="20" y="300" width="720" height="30" rx="8" class="box-fill"/>
+    <text x="380" y="320" text-anchor="middle" class="small">Правило: проєктуйте під те, ЯК читаєте. Часто гібрид: у пості — authorName (копія) + authorId (посилання).</text>
+  </svg>
+  <figcaption>Embedding оптимізує читання «всього разом», referencing — незалежне оновлення та необмежений ріст. Вибір визначають патерни доступу, а не «правильність».</figcaption>
+</figure>
+
+<h3>Aggregation pipeline коротко</h3>
+<p>Аналог <code>GROUP BY</code>/<code>JOIN</code>/підзапитів у MongoDB — <b>конвеєр агрегації</b>: масив етапів, кожен з яких трансформує потік документів і передає далі (та сама ідея, що middleware в Express).</p>
+<pre><code class="language-js">// Скільки постів і переглядів у кожного тега, топ-5
+const topTags = await posts.aggregate([
+  { $match: { published: true } },                       // як WHERE
+  { $unwind: "$tags" },                                  // розгорнути масив: один документ на тег
+  { $group: { _id: "$tags", posts: { $sum: 1 }, views: { $sum: "$stats.views" } } }, // як GROUP BY
+  { $sort: { views: -1 } },
+  { $limit: 5 },
+  { $project: { _id: 0, tag: "$_id", posts: 1, views: 1 } }, // як SELECT з перейменуванням
+]).toArray();
+
+// $lookup — "JOIN" з іншою колекцією (для referencing)
+const withAuthors = await posts.aggregate([
+  { $lookup: { from: "users", localField: "authorId", foreignField: "_id", as: "author" } },
+  { $unwind: "$author" },
+]).toArray();</code></pre>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Запустіть Mongo в Docker і виконайте CRUD-приклад вище. Відкрийте <b>MongoDB Compass</b> (безкоштовний GUI) і подивіться на документи.</li>
+    <li>Змоделюйте блог із розділу 05 двома способами: усе вбудовано; і з окремими колекціями <code>users</code>, <code>comments</code>. Напишіть для обох запит «сторінка поста з автором і коментарями». Порівняйте кількість запитів.</li>
+    <li>Додайте 10 000 коментарів до одного поста в embedded-версії через <code>$push</code> у циклі. Подивіться на розмір документа (<code>Object.bsonsize</code> у mongosh) і подумайте, що буде на мільйоні.</li>
+    <li>Виконайте <code>posts.find({ slug: "pro-kotiv" }).explain("executionStats")</code> до і після створення індексу на <code>slug</code>. Знайдіть <code>COLLSCAN</code> та <code>IXSCAN</code>.</li>
+  </ol>
+</div>
+
+<h2 id="s4">4. Redis: структури даних, кеш, rate limiter, pub/sub</h2>
+<p><b>Redis</b> (REmote DIctionary Server) — сервер структур даних в оперативній пам'яті. Усе лежить у RAM, тому читання і запис займають десятки мікросекунд; Redis обробляє 100 000+ операцій на секунду на одному ядрі. Дані можна періодично скидати на диск (RDB-знімки, AOF-журнал), але основний сценарій — <b>дані, які можна втратити або відновити</b>: кеш, сесії, лічильники, черги, блокування.</p>
+<p>На відміну від «простого» key-value, значення в Redis мають <b>типи</b>, і для кожного є свої атомарні команди:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Структура</th><th>Що це</th><th>Команди</th><th>Для чого</th></tr></thead>
+  <tbody>
+    <tr><td><b>String</b></td><td>Рядок або число до 512 МБ</td><td><code>SET</code>, <code>GET</code>, <code>INCR</code>, <code>SETEX</code></td><td>Кеш JSON, лічильники, флаги</td></tr>
+    <tr><td><b>Hash</b></td><td>Об'єкт: поле → значення</td><td><code>HSET</code>, <code>HGET</code>, <code>HGETALL</code>, <code>HINCRBY</code></td><td>Сесія користувача, профіль, конфіг</td></tr>
+    <tr><td><b>List</b></td><td>Двобічна черга</td><td><code>LPUSH</code>, <code>RPOP</code>, <code>BRPOP</code>, <code>LRANGE</code></td><td>Прості черги задач, останні N подій</td></tr>
+    <tr><td><b>Set</b></td><td>Множина унікальних рядків</td><td><code>SADD</code>, <code>SISMEMBER</code>, <code>SINTER</code></td><td>Унікальні відвідувачі, теги, «хто лайкнув»</td></tr>
+    <tr><td><b>Sorted Set</b></td><td>Множина з числовим score, відсортована</td><td><code>ZADD</code>, <code>ZRANGE</code>, <code>ZREVRANK</code>, <code>ZINCRBY</code></td><td>Рейтинги, таблиці лідерів, відкладені задачі</td></tr>
+    <tr><td><b>Stream</b></td><td>Журнал подій з групами споживачів</td><td><code>XADD</code>, <code>XREADGROUP</code></td><td>Надійні черги, event sourcing (розділ 13)</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Ключова функція — <b>TTL</b> (time to live, час життя): будь-якому ключу можна сказати «зникни через N секунд». Redis сам видалить його. Це те, що робить Redis ідеальним кешем: не треба писати код «очистити застарілі дані».</p>
+
+<h3>Кеш (cache-aside) у Node.js із ioredis</h3>
+
+<figure>
+  <svg viewBox="0 0 760 340" role="img" aria-label="Схема cache-aside: застосунок спершу питає Redis, при промаху читає Postgres і записує результат у Redis з TTL">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="120" width="150" height="70" rx="12" class="blue"/>
+    <text x="95" y="150" text-anchor="middle" class="bold">API-сервер</text>
+    <text x="95" y="170" text-anchor="middle" class="muted">GET /posts/42</text>
+
+    <rect x="300" y="30" width="180" height="70" rx="12" class="green"/>
+    <text x="390" y="58" text-anchor="middle" class="bold">Redis</text>
+    <text x="390" y="78" text-anchor="middle" class="mono small">post:42 → JSON (TTL 60 с)</text>
+
+    <rect x="300" y="220" width="180" height="70" rx="12" class="purple"/>
+    <text x="390" y="248" text-anchor="middle" class="bold">PostgreSQL</text>
+    <text x="390" y="268" text-anchor="middle" class="mono small">SELECT ... WHERE id = 42</text>
+
+    <path d="M170 140 L300 70" class="arrow"/>
+    <text x="215" y="92" text-anchor="middle" class="mono small">1. GET post:42</text>
+
+    <path d="M300 90 L170 160" class="arrow" style="stroke-dasharray:6 5"/>
+    <text x="270" y="140" text-anchor="middle" class="mono small">2a. HIT: є → віддати (~0.2 мс)</text>
+
+    <path d="M170 175 L300 245" class="arrow"/>
+    <text x="215" y="228" text-anchor="middle" class="mono small">2b. MISS: SELECT</text>
+
+    <path d="M300 275 L170 190" class="arrow" style="stroke-dasharray:6 5"/>
+    <text x="205" y="270" text-anchor="middle" class="mono small">3. рядок (~5–50 мс)</text>
+
+    <path d="M480 250 C 620 250, 620 70, 480 70" class="arrow"/>
+    <text x="640" y="165" text-anchor="middle" class="mono small">4. SET post:42 EX 60</text>
+    <text x="640" y="185" text-anchor="middle" class="small">(наступні 60 с — з кешу)</text>
+
+    <rect x="20" y="300" width="720" height="30" rx="8" class="red"/>
+    <text x="380" y="320" text-anchor="middle" class="small">Інвалідація: при UPDATE поста — DEL post:42, інакше користувачі бачитимуть старі дані до кінця TTL</text>
+  </svg>
+  <figcaption>Cache-aside: застосунок сам керує кешем. Промах — дорога дорога до бази, влучання — мікросекунди. TTL і явна інвалідація захищають від застарілих даних.</figcaption>
+</figure>
+
+<pre><code class="language-bash">docker run --name redis -p 6379:6379 -d redis:7
+npm install ioredis</code></pre>
+<pre><code class="language-js">// src/redis.mjs
+import Redis from "ioredis";
+export const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+
+// src/services/posts.service.mjs — кеш поверх репозиторію з розділу 05
+import { redis } from "../redis.mjs";
+import { postsRepository } from "../repositories/posts.repository.mjs";
+
+const TTL_SECONDS = 60;
+
+export async function getPost(id) {
+  const key = `post:${id}`;
+
+  // 1. Спробувати кеш
+  const cached = await redis.get(key);
+  if (cached) return JSON.parse(cached);          // HIT
+
+  // 2. Промах — читаємо базу
+  const post = await postsRepository.findById(id); // MISS
+  if (!post) return null;
+
+  // 3. Кладемо в кеш із TTL (EX = секунди). Redis сам видалить через хвилину.
+  await redis.set(key, JSON.stringify(post), "EX", TTL_SECONDS);
+  return post;
+}
+
+export async function updatePost(id, data) {
+  const post = await postsRepository.update(id, data);
+  await redis.del(`post:${id}`);                   // інвалідація: наступне читання піде в базу
+  return post;
+}</code></pre>
+
+<h3>Rate limiter: не більше N запитів на хвилину</h3>
+<p>Захист від зловживань (брутфорс паролів, спам, скрейпінг) — обмеження кількості запитів з однієї IP-адреси або від одного користувача. Redis для цього ідеальний: атомарний <code>INCR</code> + TTL.</p>
+<pre><code class="language-js">// src/middleware/rateLimit.mjs — фіксоване вікно: 100 запитів на 60 секунд
+import { redis } from "../redis.mjs";
+
+export function rateLimit({ limit = 100, windowSec = 60 } = {}) {
+  return async (req, res, next) =&gt; {
+    const key = `rl:${req.ip}:${Math.floor(Date.now() / 1000 / windowSec)}`; // ключ на вікно
+
+    // MULTI/EXEC — кілька команд виконуються атомарно, як мінітранзакція
+    const [[, count]] = await redis.multi()
+      .incr(key)                 // +1, повертає нове значення (створює ключ = 1, якщо не було)
+      .expire(key, windowSec)    // TTL, щоб ключ сам зник після вікна
+      .exec();
+
+    res.setHeader("X-RateLimit-Limit", limit);
+    res.setHeader("X-RateLimit-Remaining", Math.max(0, limit - count));
+
+    if (count &gt; limit) {
+      return res.status(429).json({ error: "Забагато запитів, спробуйте за хвилину" });
+    }
+    next();
+  };
+}
+
+// app.mjs
+app.use("/auth/login", rateLimit({ limit: 5, windowSec: 60 }));  // жорстко для логіну
+app.use(rateLimit({ limit: 300, windowSec: 60 }));                // м'яко для всього</code></pre>
+<p>Чому не просто об'єкт у пам'яті Node? Бо з двома екземплярами сервера у кожного був би свій лічильник, і ліміт фактично подвоївся б. Redis — <b>спільна пам'ять для всіх екземплярів</b>. Та сама причина, чому сесії користувачів тримають у Redis, а не в процесі.</p>
+
+<h3>Pub/Sub: повідомити всіх одразу</h3>
+<pre><code class="language-js">// Publish/Subscribe: один надсилає — усі підписники отримують. Повідомлення НЕ зберігаються:
+// хто не слухав у момент публікації — не отримає (для надійних черг — Streams або RabbitMQ, розділ 13)
+const sub = new Redis();
+const pub = new Redis();   // окреме з'єднання: підписане з'єднання не може робити інші команди
+
+await sub.subscribe("post:published");
+sub.on("message", (channel, message) =&gt; {
+  const post = JSON.parse(message);
+  console.log(`Новий пост "${post.title}" — розсилаємо WebSocket-клієнтам`);
+});
+
+await pub.publish("post:published", JSON.stringify({ id: 42, title: "Про Redis" }));</code></pre>
+<p>Типовий сценарій: три екземпляри API, до кожного підключені WebSocket-клієнти. Коли на екземплярі №1 з'являється новий коментар, він публікує подію в Redis, а екземпляри №2 і №3 отримують її і пересилають своїм клієнтам.</p>
+
+<div class="box warn">
+  <div class="title">Підводні камені</div>
+  <ul>
+    <li><b>Redis без <code>maxmemory</code> і політики виселення.</b> Пам'ять закінчується — Redis або падає, або відмовляє у записі. Завжди: <code>maxmemory 512mb</code> і <code>maxmemory-policy allkeys-lru</code> (видаляти найдавніше використані) для кешу.</li>
+    <li><b>Ключі без TTL.</b> «Тимчасовий» кеш без <code>EX</code> живе вічно й з'їдає пам'ять. Для кешу TTL обов'язковий.</li>
+    <li><b><code>KEYS *</code> у продакшені.</b> Блокує весь Redis на час перебору мільйонів ключів (Redis теж однопотоковий!). Тільки <code>SCAN</code>.</li>
+    <li><b>Redis як основна база.</b> При перезапуску без персистентності дані зникають; з персистентністю можна втратити останні секунди. Джерело правди — Postgres, Redis — прискорювач.</li>
+    <li><b>Забута інвалідація.</b> Оновили пост у базі, кеш лишився старим — користувач бачить «не те» і пише в підтримку. Кожен <code>UPDATE</code> має свій <code>DEL</code>.</li>
+  </ul>
+</div>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Redis — найчастіший другий компонент у будь-якому продакшен-стеку після основної бази. Кеш у Redis знижує навантаження на Postgres у десятки разів і робить відповіді миттєвими; rate limiter — перша лінія захисту від атак; сесії в Redis — умова горизонтального масштабування. Уміння сказати «це в Postgres, а це — в Redis із TTL 5 хвилин» — ознака інженера, а не кодера.</p>
+</div>
+
+<h2 id="s5">5. SQL проти NoSQL: порівняння і CAP-теорема</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Критерій</th><th>Реляційні (PostgreSQL)</th><th>Документні (MongoDB)</th><th>Ключ-значення (Redis)</th></tr></thead>
+  <tbody>
+    <tr><td><b>Модель даних</b></td><td>Таблиці зі зв'язками, нормалізація</td><td>Вкладені документи, embedding/referencing</td><td>Ключ → структура (string, hash, set...)</td></tr>
+    <tr><td><b>Схема</b></td><td>Сувора, задана заздалегідь, міграції</td><td>Гнучка на рівні бази; схема в коді (Mongoose) або schema validation</td><td>Немає</td></tr>
+    <tr><td><b>Транзакції</b></td><td>Повний ACID, багатотабличні</td><td>ACID у межах документа завжди; мультидокументні — є з 4.0, повільніші</td><td>MULTI/EXEC атомарний батч, Lua-скрипти</td></tr>
+    <tr><td><b>Консистентність</b></td><td>Сильна</td><td>Налаштовувана (write/read concern)</td><td>Сильна на одному вузлі; у кластері — eventual для реплік</td></tr>
+    <tr><td><b>Запити</b></td><td>SQL: JOIN, агрегації, підзапити, віконні функції — найбагатші</td><td>Фільтри по полях, aggregation pipeline, $lookup (слабший за JOIN)</td><td>Тільки за ключем + операції над структурою</td></tr>
+    <tr><td><b>Масштабування</b></td><td>Вертикальне + репліки читання; шардинг складний (Citus)</td><td>Горизонтальний шардинг вбудований</td><td>Redis Cluster — шардинг за ключем</td></tr>
+    <tr><td><b>Швидкість</b></td><td>Мілісекунди, з диску + кеш ОС</td><td>Мілісекунди, добре для читання цілих документів</td><td>Мікросекунди, усе в RAM</td></tr>
+    <tr><td><b>Типовий вибір</b></td><td>Основна база 90 % застосунків: користувачі, замовлення, гроші</td><td>Каталоги, CMS, події з різною структурою, швидкі прототипи</td><td>Кеш, сесії, лічильники, черги, блокування</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Важливе уточнення: межі розмиваються. PostgreSQL має <code>jsonb</code> із індексами — і може бути непоганою документною базою. MongoDB має транзакції та schema validation. Тому вибір робиться не за «типом», а за <b>основним патерном доступу і потрібними гарантіями</b>.</p>
+
+<h3>CAP-теорема (вступ)</h3>
+<p>Коли база розподілена по кількох серверах (а всі NoSQL створювались саме для цього), спрацьовує <b>CAP-теорема</b>: із трьох властивостей — <b>C</b>onsistency (узгодженість: усі вузли бачать одні дані), <b>A</b>vailability (доступність: кожен запит отримує відповідь), <b>P</b>artition tolerance (стійкість до розділення мережі) — під час розриву мережі можна забезпечити лише дві. Оскільки розриви мережі неминучі (P — не вибір, а факт), реальний вибір — <b>C або A під час збою</b>.</p>
+
+<figure>
+  <svg viewBox="0 0 760 320" role="img" aria-label="CAP-теорема: трикутник узгодженість, доступність, стійкість до розділення; під час розриву мережі система обирає між C і A">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="200" height="60" rx="12" class="blue"/>
+    <text x="120" y="45" text-anchor="middle" class="bold">Вузол A (Київ)</text>
+    <text x="120" y="66" text-anchor="middle" class="mono small">balance = 100</text>
+    <rect x="540" y="20" width="200" height="60" rx="12" class="blue"/>
+    <text x="640" y="45" text-anchor="middle" class="bold">Вузол B (Варшава)</text>
+    <text x="640" y="66" text-anchor="middle" class="mono small">balance = 100</text>
+    <path d="M220 50 L360 50" class="arrow" style="marker-end:none"/>
+    <path d="M400 50 L540 50" class="arrow" style="marker-end:none"/>
+    <text x="380" y="56" text-anchor="middle" class="bold" style="fill:var(--red);font-size:22px">✕</text>
+    <text x="380" y="90" text-anchor="middle" class="small">розрив мережі (partition) — репліки не можуть синхронізуватись</text>
+
+    <rect x="20" y="120" width="340" height="180" rx="12" class="green"/>
+    <text x="190" y="146" text-anchor="middle" class="bold">Обрати C (узгодженість)</text>
+    <text x="35" y="172" class="small">Клієнт пише у A: «зніми 100».</text>
+    <text x="35" y="192" class="small">A не може підтвердити з B → відмовляє:</text>
+    <text x="35" y="212" class="mono small">«503, спробуйте пізніше»</text>
+    <text x="35" y="240" class="small">+ ніколи не буде двох різних «правд»</text>
+    <text x="35" y="260" class="small">− частина запитів падає під час збою</text>
+    <text x="35" y="284" class="small muted">Postgres (sync replication), Zookeeper, банки</text>
+
+    <rect x="400" y="120" width="340" height="180" rx="12" class="accent"/>
+    <text x="570" y="146" text-anchor="middle" class="bold">Обрати A (доступність)</text>
+    <text x="415" y="172" class="small">A приймає «зніми 100» → balance 0.</text>
+    <text x="415" y="192" class="small">B одночасно теж приймає «зніми 100» → 0.</text>
+    <text x="415" y="212" class="small">Після відновлення мережі: конфлікт, −100.</text>
+    <text x="415" y="240" class="small">+ система завжди відповідає</text>
+    <text x="415" y="260" class="small">− дані «сходяться» пізніше (eventual consistency)</text>
+    <text x="415" y="284" class="small muted">Cassandra, DynamoDB, лайки, перегляди, кошик</text>
+  </svg>
+  <figcaption>Під час розриву мережі розподілена система мусить обрати: відмовити (зберегти узгодженість) чи відповісти (ризикнути розбіжністю). Для грошей — C, для лайків — A.</figcaption>
+</figure>
+
+<p>Це спрощення: сучасні системи дають налаштовувати вибір на кожен запит (write concern у MongoDB, consistency level у Cassandra), а формулювання «або C, або A» справедливе лише під час збою. Детально — у розділі 14 про розподілені системи. Поки що запам'ятайте практичний висновок: <b>eventual consistency</b> (дані стануть узгодженими «з часом») — нормально для лайків і переглядів, і неприйнятно для балансу рахунку.</p>
+
+<h2 id="s6">6. Polyglot persistence: кілька баз в одній системі</h2>
+<p>Термін <b>polyglot persistence</b> («багатомовне зберігання») ввів Мартін Фаулер: сучасний застосунок використовує <b>кілька баз даних, кожну для того, у чому вона найкраща</b>. Не «Postgres або Mongo», а «Postgres для замовлень, Redis для кешу і сесій, Elasticsearch для пошуку». Ось реальна архітектура інтернет-магазину:</p>
+
+<figure>
+  <svg viewBox="0 0 760 430" role="img" aria-label="Архітектура polyglot persistence: API-сервер працює з PostgreSQL як джерелом правди, Redis для кешу та сесій, Elasticsearch для пошуку; зміни з Postgres синхронізуються в Elasticsearch через чергу">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect x="20" y="20" width="140" height="56" rx="12" class="blue"/>
+    <text x="90" y="44" text-anchor="middle" class="bold">Браузер</text>
+    <text x="90" y="64" text-anchor="middle" class="muted">магазин</text>
+    <path d="M160 48 L250 48" class="arrow"/>
+    <text x="205" y="38" text-anchor="middle" class="mono small">HTTPS</text>
+
+    <rect x="250" y="20" width="260" height="56" rx="12" class="accent"/>
+    <text x="380" y="44" text-anchor="middle" class="bold">API (Node.js) × 3 екземпляри</text>
+    <text x="380" y="64" text-anchor="middle" class="muted">за балансувальником</text>
+
+    <!-- Postgres -->
+    <rect x="20" y="150" width="200" height="90" rx="12" class="purple"/>
+    <text x="120" y="176" text-anchor="middle" class="bold">PostgreSQL</text>
+    <text x="120" y="196" text-anchor="middle" class="small">джерело правди</text>
+    <text x="120" y="214" text-anchor="middle" class="mono small">users, products, orders,</text>
+    <text x="120" y="230" text-anchor="middle" class="mono small">payments — ACID</text>
+    <path d="M310 76 L140 150" class="arrow"/>
+    <text x="190" y="108" text-anchor="middle" class="small">замовлення, оплата,</text>
+    <text x="190" y="124" text-anchor="middle" class="small">картка товару (при промаху)</text>
+
+    <!-- Redis -->
+    <rect x="280" y="150" width="200" height="90" rx="12" class="green"/>
+    <text x="380" y="176" text-anchor="middle" class="bold">Redis</text>
+    <text x="380" y="196" text-anchor="middle" class="small">швидкий шар, дані відновлювані</text>
+    <text x="380" y="214" text-anchor="middle" class="mono small">кеш товарів (TTL), сесії,</text>
+    <text x="380" y="230" text-anchor="middle" class="mono small">кошик, rate limit, pub/sub</text>
+    <path d="M380 76 L380 150" class="arrow"/>
+    <text x="440" y="118" text-anchor="middle" class="small">кожен запит:</text>
+    <text x="440" y="134" text-anchor="middle" class="small">сесія + кеш</text>
+
+    <!-- Elasticsearch -->
+    <rect x="540" y="150" width="200" height="90" rx="12" class="red"/>
+    <text x="640" y="176" text-anchor="middle" class="bold">Elasticsearch</text>
+    <text x="640" y="196" text-anchor="middle" class="small">пошук і фільтри каталогу</text>
+    <text x="640" y="214" text-anchor="middle" class="mono small">«кросівки найк 42» →</text>
+    <text x="640" y="230" text-anchor="middle" class="mono small">релевантність, фасети, одруки</text>
+    <path d="M450 76 L620 150" class="arrow"/>
+    <text x="570" y="108" text-anchor="middle" class="small">GET /search?q=...</text>
+
+    <!-- sync -->
+    <path d="M220 200 L280 200" class="arrow dashed"/>
+    <text x="250" y="190" text-anchor="middle" class="small">кеш</text>
+    <path d="M120 240 L120 300" class="arrow"/>
+    <rect x="20" y="300" width="460" height="56" rx="12" class="box-fill"/>
+    <text x="250" y="322" text-anchor="middle" class="bold">Черга подій (Redis Streams / RabbitMQ)</text>
+    <text x="250" y="342" text-anchor="middle" class="mono small">product.updated → worker → переіндексувати в Elasticsearch</text>
+    <path d="M480 328 L640 328 L640 240" class="arrow"/>
+
+    <rect x="20" y="380" width="720" height="40" rx="10" class="accent"/>
+    <text x="380" y="398" text-anchor="middle" class="small">Правило: одне джерело правди (Postgres). Redis і Elasticsearch — похідні, які можна перебудувати з нуля з Postgres.</text>
+    <text x="380" y="414" text-anchor="middle" class="small">Якщо ES «загубив» товар — переіндексувати. Якщо Postgres загубив замовлення — катастрофа.</text>
+  </svg>
+  <figcaption>Інтернет-магазин: Postgres відповідає за гроші й правду, Redis — за швидкість, Elasticsearch — за пошук. Дані течуть від джерела правди до похідних сховищ через чергу.</figcaption>
+</figure>
+
+<p>Розберімо, чому саме так:</p>
+<ul>
+  <li><b>Замовлення і платежі — Postgres.</b> Тут потрібні транзакції («зарезервувати товар і списати гроші — разом або ніяк»), зовнішні ключі й сувора схема. Втрата або розбіжність даних недопустима.</li>
+  <li><b>Картка товару — Postgres як джерело, Redis як кеш.</b> Одна й та сама сторінка товару відкривається тисячі разів на хвилину; змінюється — раз на день. Кеш із TTL 5 хвилин знімає 99 % навантаження з бази.</li>
+  <li><b>Сесія і кошик — Redis.</b> Читаються на кожному запиті (мікросекунди важливі), мають природний TTL (кошик живе 30 днів), і їх можна безболісно втратити (користувач залогіниться знову). Спільні для всіх трьох екземплярів API.</li>
+  <li><b>Пошук — Elasticsearch.</b> «Кросівки найк 42 червоні» з урахуванням морфології, синонімів, одруків, з фасетами «бренд/розмір/колір» і сортуванням за релевантністю. Postgres із <code>ILIKE</code> цього не вміє; його повнотекстовий пошук (<code>tsvector</code>) — компроміс для малих каталогів.</li>
+  <li><b>Синхронізація через чергу.</b> Коли товар змінюється в Postgres, API кладе подію в чергу; окремий worker читає її та оновлює документ в Elasticsearch. Так API не чекає на ES, а якщо ES недоступний — подія дочекається в черзі. Це патерн, який детально розберемо в розділі 13.</li>
+</ul>
+<p>Мінус polyglot persistence — <b>складність</b>: три системи треба запускати, моніторити, бекапити і синхронізувати. Тому правило для старту: <b>починайте з Postgres + Redis</b>. Це покриває 95 % потреб. MongoDB, Elasticsearch, Cassandra додавайте тоді, коли зможете сформулювати конкретну задачу, яку Postgres не вирішує.</p>
+
+<div class="box pro">
+  <div class="title">Для просунутих</div>
+  <p>Синхронізацію між сховищами можна робити без коду в API — через <b>CDC</b> (Change Data Capture): інструмент на кшталт Debezium читає WAL-журнал Postgres і публікує кожну зміну в Kafka, звідки її споживають індексатор Elasticsearch, інвалідатор кешу, аналітика. API взагалі не знає про похідні сховища. Ще один важливий патерн — <b>outbox</b>: замість «записати в Postgres, потім опублікувати в чергу» (де між двома кроками може статись збій), зміну і подію записують в одну транзакцію в таблицю <code>outbox</code>, а окремий процес надійно переносить події з неї в чергу. Обидва патерни вирішують головну проблему polyglot persistence — розсинхронізацію.</p>
+</div>
+
+<div class="box try">
+  <div class="title">Спробуй сам</div>
+  <ol>
+    <li>Підключіть Redis до API нотаток із розділів 04–05: кешуйте <code>GET /notes/:id</code> на 60 секунд, інвалідуйте при PATCH/DELETE. Зробіть 100 запитів через <code>curl</code> у циклі до і після кешу, порівняйте час через <code>time</code>.</li>
+    <li>Додайте rate limiter: 10 запитів на хвилину на <code>POST /notes</code>. Перевищіть ліміт і подивіться на 429 і заголовки <code>X-RateLimit-*</code>.</li>
+    <li>Запустіть два екземпляри API на портах 3000 і 3001 (один код, різний <code>PORT</code>). Переконайтесь, що ліміт спільний — бо лічильник у Redis, а не в процесі.</li>
+    <li>Реалізуйте «останні 10 переглянутих нотаток» користувача через Redis List (<code>LPUSH</code> + <code>LTRIM 0 9</code>) і таблицю лідерів «найпопулярніші нотатки» через Sorted Set (<code>ZINCRBY</code> при кожному перегляді, <code>ZREVRANGE 0 4 WITHSCORES</code>).</li>
+    <li>Відкрийте <code>redis-cli</code> (<code>docker exec -it redis redis-cli</code>), виконайте <code>INFO memory</code> і <code>CONFIG GET maxmemory-policy</code>. Встановіть <code>CONFIG SET maxmemory 100mb</code> та <code>allkeys-lru</code>.</li>
+  </ol>
+</div>
+
+<h2 id="s7">7. Типові помилки</h2>
+<ol>
+  <li><b>«Mongo без схеми» = хаос.</b> Гнучкість схеми — не привід її не мати. Через рік у колекції <code>users</code> буде <code>phone</code>, <code>phoneNumber</code>, <code>phone_number</code> і <code>contacts.phone</code>, а код обробляє всі чотири. Ліки: схема в коді (Mongoose або zod) плюс <a href="https://www.mongodb.com/docs/manual/core/schema-validation/" target="_blank" rel="noopener">schema validation</a> на рівні бази; свідомі міграції даних при зміні форми.</li>
+  <li><b>Mongo як реляційна база.</b> Десять колекцій, усе через referencing, на кожній сторінці по п'ять <code>$lookup</code>. Це найгірше з обох світів: немає ні швидкості документів, ні потужності SQL JOIN. Якщо дані реляційні за природою — беріть Postgres.</li>
+  <li><b>Необмежене embedding.</b> Масив коментарів усередині поста росте до 16 МБ (ліміт документа) і все ламається. Правило: вбудовуйте лише те, що обмежене (адреси, останні 5 коментарів), необмежене — в окрему колекцію.</li>
+  <li><b>Redis без <code>maxmemory</code> і без TTL.</b> Розібрано вище: пам'ять закінчується, сервер падає посеред ночі.</li>
+  <li><b>Redis як джерело правди.</b> Замовлення тільки в Redis → перезапуск → замовлень немає. Redis — прискорювач для даних, які можна відновити.</li>
+  <li><b>Дублювання без плану оновлення.</b> Скопіювали ім'я автора в кожен пост (це нормальна денормалізація), але не написали код, який оновлює копії при зміні імені. Через місяць у половини постів старе ім'я. Кожен дублікат = задокументований механізм синхронізації (транзакція, подія в черзі, фонова задача).</li>
+  <li><b>Кеш без інвалідації або з інвалідацією «колись».</b> Користувач змінив аватар, а бачить старий 10 хвилин і пише в підтримку. Кожна мутація має знати, які ключі кешу вона псує.</li>
+  <li><b>Вибір бази за модою.</b> «Візьмемо Cassandra, бо в Netflix» — для стартапу з 1000 користувачів. Кожна додаткова база — це +1 система для моніторингу, бекапів і онбордингу. Postgres + Redis, поки не доведено зворотне.</li>
+</ol>
+
+<div class="box why">
+  <div class="title">Чому це важливо</div>
+  <p>Усі помилки вище об'єднує одне: NoSQL перекладає на розробника відповідальність, яку реляційна база брала на себе — за цілісність, за схему, за узгодженість дублікатів. Це не погано: ви отримуєте свободу і швидкість. Але свобода без дисципліни дає базу, яку через рік ніхто не розуміє. Коли обираєте NoSQL, одразу пишіть: де схема, хто оновлює копії, коли інвалідується кеш.</p>
+</div>
+
+<h2>Перевір себе</h2>
+<div class="box quiz">
+  <div class="title">Питання</div>
+  <details><summary>1. Що означає NoSQL і які дві головні причини його появи?</summary><p>«Not Only SQL» — бази, що не є класичними реляційними. Причини: горизонтальне масштабування на багато серверів (де JOIN і глобальні транзакції не працюють) і гнучкість схеми для даних із різною структурою. Додатково — спеціалізація під швидкість (кеш) і пошук.</p></details>
+  <details><summary>2. Назвіть п'ять типів NoSQL-баз і по одній задачі для кожного.</summary><p>Документні (MongoDB — каталог товарів із різними атрибутами), ключ-значення (Redis — кеш і сесії), колонкові (Cassandra — логи й метрики з величезним потоком записів), графові (Neo4j — рекомендації «друзі друзів»), пошукові (Elasticsearch — повнотекстовий пошук з одруками).</p></details>
+  <details><summary>3. Коли в MongoDB вбудовувати (embed), а коли посилатись (reference)?</summary><p>Вбудовувати — коли дані обмежені за кількістю, читаються завжди разом із батьківським документом і оновлюються разом із ним (адреса, налаштування). Посилатись — коли даних необмежено багато, вони оновлюються незалежно або потрібні окремо (коментарі, автори). Ліміт документа — 16 МБ.</p></details>
+  <details><summary>4. Як реалізувати кеш-aside і чому обов'язкові TTL та інвалідація?</summary><p>Спершу читаємо з Redis; при промаху — з бази, і записуємо в Redis із TTL. TTL гарантує, що застарілі дані зникнуть самі й пам'ять не переповниться. Інвалідація (<code>DEL</code> при оновленні) потрібна, щоб користувачі не бачили старі дані впродовж усього TTL.</p></details>
+  <details><summary>5. Чому rate limiter тримають у Redis, а не в змінній у Node.js?</summary><p>Бо з кількома екземплярами сервера кожен мав би окремий лічильник, і ліміт множився б на кількість екземплярів. Redis — спільна пам'ять для всіх; <code>INCR</code> атомарний, тому гонок немає; TTL сам чистить старі вікна.</p></details>
+  <details><summary>6. Що каже CAP-теорема і який практичний висновок?</summary><p>Під час розриву мережі розподілена система може гарантувати або узгодженість (відмовити в операції), або доступність (відповісти, ризикуючи розбіжністю). Практично: для грошей і унікальних обмежень — C (Postgres), для лайків, переглядів, кошика — прийнятна eventual consistency (A).</p></details>
+  <details><summary>7. Що таке polyglot persistence і яке головне правило при його застосуванні?</summary><p>Використання кількох баз, кожної для своєї задачі (Postgres — правда і транзакції, Redis — швидкість, Elasticsearch — пошук). Головне правило: одне джерело правди; решта сховищ — похідні, які можна перебудувати з нього; синхронізація через чергу подій.</p></details>
+  <details><summary>8. Чому «Mongo без схеми» — це помилка, якщо Mongo і є безсхемною?</summary><p>База не вимагає схеми, але застосунок її завжди має — просто неявно. Без явної схеми (Mongoose, zod, schema validation) поля розповзаються у варіанти назв і типів, а код обростає перевірками «якщо поле є і воно рядок...». Гнучкість схеми — про еволюцію, а не про відсутність.</p></details>
+</div>
+
+<h2>Що запам'ятати</h2>
+<ul class="checklist">
+  <li>NoSQL = «Not Only SQL»: не заміна реляційних баз, а інші інструменти для інших форм даних і масштабу.</li>
+  <li>П'ять сімейств: документні (MongoDB), ключ-значення (Redis, DynamoDB), колонкові (Cassandra), графові (Neo4j), пошукові (Elasticsearch). Обирають за патерном доступу.</li>
+  <li>MongoDB: документ ≈ JSON (BSON), колекція ≈ таблиця; проєктуйте під те, як читаєте: embedding для «мало і разом», referencing для «багато і окремо».</li>
+  <li>Індекси в Mongo так само обов'язкові, як у Postgres; <code>explain()</code> показує COLLSCAN проти IXSCAN.</li>
+  <li>Redis — структури даних у RAM: string, hash, list, set, sorted set, stream; TTL робить його ідеальним кешем.</li>
+  <li>Cache-aside: читати з Redis → при промаху з бази → записати з TTL; кожна мутація інвалідує свої ключі.</li>
+  <li>Rate limiter, сесії, лічильники — у Redis, бо це спільна атомарна пам'ять для всіх екземплярів сервера.</li>
+  <li>Обов'язково: <code>maxmemory</code> + <code>allkeys-lru</code> для кешу, ніякого <code>KEYS *</code>, Redis — не джерело правди.</li>
+  <li>CAP: під час збою — узгодженість або доступність; гроші — C, лайки — A (eventual consistency).</li>
+  <li>Polyglot persistence: одне джерело правди (Postgres), похідні сховища синхронізуються через чергу. Починайте з Postgres + Redis.</li>
+  <li>Гнучка схема ≠ відсутність схеми; кожен дублікат даних — задокументований механізм оновлення.</li>
+</ul>
+
+<div class="box links">
+  <div class="title">Ресурси для поглиблення</div>
+  <ul>
+    <li><a href="https://www.mongodb.com/docs/manual/" target="_blank" rel="noopener">MongoDB Manual</a> — офіційна документація: CRUD, індекси, aggregation, <a href="https://www.mongodb.com/docs/manual/data-modeling/" target="_blank" rel="noopener">Data Modeling</a> з патернами embedding/referencing.</li>
+    <li><a href="https://learn.mongodb.com/" target="_blank" rel="noopener">MongoDB University</a> — безкоштовні курси з сертифікатами; «Introduction to MongoDB» і «MongoDB for Node.js Developers» — саме те, що треба після цього розділу.</li>
+    <li><a href="https://mongoosejs.com/docs/guide.html" target="_blank" rel="noopener">Mongoose Docs</a> — схеми, валідація, middleware (hooks), populate для referencing.</li>
+    <li><a href="https://redis.io/docs/latest/" target="_blank" rel="noopener">Redis Documentation</a> — <a href="https://redis.io/docs/latest/develop/data-types/" target="_blank" rel="noopener">типи даних</a> із прикладами, персистентність, <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/config/" target="_blank" rel="noopener">конфігурація maxmemory</a>.</li>
+    <li><a href="https://university.redis.io/" target="_blank" rel="noopener">Redis University</a> — безкоштовні курси; «Redis for JavaScript developers» показує кеш, сесії та черги на Node.</li>
+    <li><a href="https://github.com/redis/ioredis" target="_blank" rel="noopener">ioredis</a> — README клієнта: пайплайни, транзакції MULTI, pub/sub, кластер.</li>
+    <li><a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html" target="_blank" rel="noopener">Elasticsearch Guide</a> — інвертований індекс, аналізатори, запити; для старту — розділ «Getting started».</li>
+    <li><a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html" target="_blank" rel="noopener">Amazon DynamoDB Developer Guide</a> — керована key-value база; розділ про single-table design показує, наскільки інакше моделюють дані без JOIN.</li>
+    <li><a href="https://neo4j.com/docs/getting-started/" target="_blank" rel="noopener">Neo4j Getting Started</a> — графова модель і мова Cypher на прикладі соціального графа.</li>
+    <li><a href="https://martinfowler.com/bliki/PolyglotPersistence.html" target="_blank" rel="noopener">Martin Fowler — Polyglot Persistence</a> — коротка стаття, яка ввела термін; читається за 5 хвилин.</li>
+    <li><a href="https://martinfowler.com/books/nosql.html" target="_blank" rel="noopener">«NoSQL Distilled», Sadalage &amp; Fowler</a> — тонка книга про моделі даних, консистентність і вибір бази; найкращий концептуальний вступ.</li>
+    <li><a href="https://www.mongodb.com/docs/manual/core/schema-validation/" target="_blank" rel="noopener">MongoDB Schema Validation</a> — як увімкнути перевірку схеми на рівні бази, щоб «гнучкість» не стала хаосом.</li>
+  </ul>
+</div>
+
+<nav class="pager" id="pager"></nav>
+<footer>Fullstack для чайників · Розділ 06</footer>
+</main>
+</div>
+<script src="../assets/nav.js"></script>
+</body>
+</html>
